@@ -1,0 +1,17 @@
+http:
+  routers:
+    registry:
+      rule: "Host(`registry-api.localhost`)"
+      service: registry
+    registry-ui:
+      rule: "Host(`registry.localhost`)"
+      service: registry-ui
+  services:
+    registry:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:50000"
+    registry-ui:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:49159"

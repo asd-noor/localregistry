@@ -1,0 +1,28 @@
+services:
+  registry:
+    image: ghcr.io/distribution/distribution:${REGISTRY_API_CONT_VER}
+    container_name: registry
+    environment:
+      OTEL_TRACES_EXPORTER: none
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_HTTP_HEADERS_Access-Control-Allow-Origin: '["http://${REGISTRY_UI_URL}"]'
+      REGISTRY_HTTP_HEADERS_Access-Control-Allow-Methods: '["HEAD","GET","OPTIONS","DELETE"]'
+      REGISTRY_HTTP_HEADERS_Access-Control-Allow-Headers: '["Authorization","Accept","Cache-Control"]'
+      REGISTRY_HTTP_HEADERS_Access-Control-Expose-Headers: '["Docker-Content-Digest"]'
+    ports:
+      - "${REGISTRY_API_PORT}:5000"
+    volumes:
+      - ${REGISTRY_DATA_SOURCE}:/var/lib/registry
+
+  ui:
+    image: joxit/docker-registry-ui:${REGISTRY_UI_CONT_VER}
+    container_name: registry-ui
+    environment:
+      REGISTRY_URL: http://${REGISTRY_UI_URL}
+      PULL_URL: ${REGISTRY_API_URL}:${REGISTRY_API_PORT}
+      SINGLE_REGISTRY: true
+      REGISTRY_TITLE: Local Registry
+      DELETE_IMAGES: "true"
+      NGINX_PROXY_PASS_URL: http://registry:5000
+    ports:
+      - "${REGISTRY_UI_PORT}:80"

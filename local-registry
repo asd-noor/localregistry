@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${REGISTRY_API_URL:=localhost}"
+: "${REGISTRY_API_PORT:=50000}"
+: "${REGISTRY_DATA_SOURCE:=./data}"
+
+: "${REGISTRY_COMPOSE_DIR:=}"
+
+start_server() {
+    if [[ -z ${REGISTRY_COMPOSE_DIR} ]]; then
+        echo "REGISTRY_COMPOSE_DIR is unset" >&2
+        exit 1
+    fi
+    (cd "${REGISTRY_COMPOSE_DIR}" && make start)
+}
+
+stop_server() {
+    if [[ -z ${REGISTRY_COMPOSE_DIR} ]]; then
+        echo "REGISTRY_COMPOSE_DIR is unset" >&2
+        exit 1
+    fi
+    (cd "${REGISTRY_COMPOSE_DIR}" && make stop)
+}
+
+update_server() {
+    if [[ -z ${REGISTRY_COMPOSE_DIR} ]]; then
+        echo "REGISTRY_COMPOSE_DIR is unset" >&2
+        exit 1
+    fi
+    (cd "${REGISTRY_COMPOSE_DIR}" && make update)
+}
+
+usage() {
+    cat <<'EOF'
+Usage: local-registry <command> [args]
+
+Commands:
+  add <source-image> [target]         Mirror an image into the local registry using skopeo
+  delete-tag <repository> <tag>       Delete a specific tag
+  delete-image <repository> [tags...] Delete provided tags; if none given, delete all tags
+  delete-repo <repository>            Delete an entire repository (all tags)
+
+  start-server                        Starts the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
+  stop-server                         Stops the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
+  update-server                       Updates the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
+
+  completion-bash                     Emit bash completion script
+  completion-zsh                      Emit zsh completion script
+
+Environment overrides:
+  REGISTRY_API_URL, REGISTRY_API_PORT   Registry endpoint (defaults: registry-api.localhost:50000)
+  REGISTRY_COMPOSE_DIR                  Directory with Makefile providing start/stop/update targets
+  SKOPEO_DEBUG=true                     Enable verbose skopeo logging
+EOF
+}
+
+endpoint() {
+    echo "http://${REGISTRY_API_URL}:${REGISTRY_API_PORT}/v2"
+}
+
+require_skopeo() {
+    command -v skopeo >/dev/null 2>&1 || {
+        echo "skopeo not found" >&2
+        exit 1
+    }
+}
+
+require_jq() {
+    command -v jq >/dev/null 2>&1 || {
+        echo "jq is required" >&2
+        exit 1
+    }
+}
+
+push_image() {
+    if [[ $# -lt 1 || $# -gt 2 ]]; then
+        echo "Usage: local-registry add <source-image> [target]" >&2
+        exit 64
+    fi
+    require_skopeo
+    local source=$1
+    local target=${2:-$(basename "${source}")}
+    local dest="${REGISTRY_API_URL}:${REGISTRY_API_PORT}/${target}"
+    local skopeo_opts=(--dest-tls-verify=false --multi-arch=all --retry-times=3)
+    if [[ ${SKOPEO_DEBUG:-} == "true" ]]; then
+        skopeo_opts+=(--debug)
+    fi
+    skopeo copy "${skopeo_opts[@]}" "docker://${source}" "docker://${dest}"
+    echo "Added ${source} -> ${dest}"
+}
+
+get_digest() {
+    local repo=$1
+    local ref=$2
+    local headers
+    headers=$(curl -sSI "$(endpoint)/${repo}/manifests/${ref}") || true
+    grep -i "Docker-Content-Digest" <<<"${headers}" | awk -F': ' '{print $2}' | tr -d '\r'
+}
+
+delete_tag() {
+    if [[ $# -ne 2 ]]; then
+        echo "Usage: local-registry delete-tag <repository> <tag>" >&2
+        exit 64
+    fi
+    local repo=$1
+    local tag=$2
+    local digest
+    digest=$(get_digest "${repo}" "${tag}")
+    if [[ -z ${digest} ]]; then
+        echo "Unable to resolve digest for ${repo}:${tag}" >&2
+        exit 1
+    fi
+    echo "Deleting ${repo}:${tag} (${digest})"
+    curl -sS -X DELETE "$(endpoint)/${repo}/manifests/${digest}" -o /dev/null -w '%{http_code}\n'
+}
+
+list_tags() {
+    require_jq
+    local repo=$1
+    curl -sS "$(endpoint)/${repo}/tags/list" | jq -r '.tags[]?'
+}
+
+delete_image() {
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: local-registry delete-image <repository> [tags...]" >&2
+        exit 64
+    fi
+    local repo=$1
+    shift
+    local tags=()
+    if [[ $# -eq 0 ]]; then
+        mapfile -t tags < <(list_tags "${repo}")
+    else
+        tags=($@)
+    fi
+    if [[ ${#tags[@]} -eq 0 ]]; then
+        echo "No tags found for ${repo}" >&2
+        return 0
+    fi
+    for tag in "${tags[@]}"; do
+        delete_tag "${repo}" "${tag}"
+    done
+}
+
+delete_repo() {
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: local-registry delete-repo <repository>" >&2
+        exit 64
+    fi
+    local repo=$1
+    mapfile -t tags < <(list_tags "${repo}") || true
+    if [[ ${#tags[@]} -eq 0 ]]; then
+        echo "Repository ${repo} has no tags"
+        return 0
+    fi
+    echo "Deleting repository ${repo} with tags: ${tags[*]}"
+    delete_image "${repo}" "${tags[@]}"
+}
+
+cmd=${1:-}
+if [[ -z ${cmd} ]]; then
+    usage
+    exit 64
+fi
+shift
+
+bash_completion() {
+    cat <<'EOF'
+# bash completion for local-registry
+_local_registry()
+{
+  local cur prev words cword
+  _init_completion || return
+
+  local commands="add delete-tag delete-image delete-repo start-server stop-server update-server completion-bash completion-zsh help --help -h"
+
+  case ${COMP_CWORD} in
+    1)
+      COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
+      return
+      ;;
+    2)
+      case ${prev} in
+        add)
+          COMPREPLY=()
+          return
+          ;;
+        delete-tag|delete-image|delete-repo)
+          if [[ -d ${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories ]]; then
+            local repos
+            repos=$(find "${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n')
+            COMPREPLY=( $(compgen -W "${repos}" -- "${cur}") )
+          fi
+          return
+          ;;
+        *)
+          ;;
+      esac
+      ;;
+    3)
+      case ${words[1]} in
+        add)
+          COMPREPLY=()
+          ;;
+        delete-tag|delete-image)
+          local repo=${words[2]}
+          local api_url=${REGISTRY_API_URL}
+          local api_port=${REGISTRY_API_PORT}
+          local tags
+          tags=$(curl -fsS "http://${api_url}:${api_port}/v2/${repo}/tags/list" | jq -r '.tags[]?' 2>/dev/null)
+          COMPREPLY=( $(compgen -W "${tags}" -- "${cur}") )
+          ;;
+      esac
+      ;;
+  esac
+}
+complete -F _local_registry local-registry
+EOF
+}
+
+zsh_completion() {
+    cat <<'EOF'
+#compdef local-registry
+
+_local_registry_complete() {
+  local -a commands
+  commands=(add delete-tag delete-image delete-repo start-server stop-server update-server completion-bash completion-zsh help --help -h)
+
+  local state
+  _arguments \
+    '1:command:->command' \
+    '2:repo:->repo' \
+    '3:tag:->tag' \
+    '*:args:->args'
+
+  case $state in
+    command)
+      _values 'local-registry command' $commands
+      ;;
+    repo)
+      case $words[2] in
+        delete-tag|delete-image|delete-repo)
+          if [[ -d ${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories ]]; then
+            local repos
+            repos=($(find "${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n'))
+            _values 'repositories' $repos
+          else
+            _message 'repository name'
+          fi
+          ;;
+        *)
+          _message 'repository name'
+          ;;
+      esac
+      ;;
+    tag)
+      case $words[2] in
+        delete-tag|delete-image)
+          local repo=$words[3]
+          local api_url=${REGISTRY_API_URL}
+          local api_port=${REGISTRY_API_PORT}
+          local tags
+          tags=($(curl -fsS "http://${api_url}:${api_port}/v2/${repo}/tags/list" | jq -r '.tags[]?' 2>/dev/null))
+          _values 'tags' $tags
+          ;;
+        *)
+          ;;
+      esac
+      ;;
+    *)
+      ;;
+  esac
+}
+
+local-registry() {
+  _local_registry_complete "$@"
+}
+EOF
+}
+
+case ${cmd} in
+add) push_image "$@" ;;
+delete-tag) delete_tag "$@" ;;
+delete-image) delete_image "$@" ;;
+delete-repo) delete_repo "$@" ;;
+start-server) start_server ;;
+stop-server) stop_server ;;
+update-server) update_server ;;
+completion-bash) bash_completion ;;
+completion-zsh) zsh_completion ;;
+-h | --help | help) usage ;;
+*)
+    echo "Unknown command: ${cmd}" >&2
+    usage
+    exit 64
+    ;;
+esac
