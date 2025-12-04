@@ -8,7 +8,7 @@ install_dir="${INSTALL_DIR:-$(pwd)}"
 if [[ "$install_dir" != "$PWD" ]]; then
     mkdir -p "$install_dir"
     # Copy only necessary files (adjust patterns as needed)
-    cp -v Makefile docker-compose.yaml traefik.yaml local-registry "$install_dir/"
+    cp -v Makefile docker-compose.rootful.yaml docker-compose.rootless.yaml traefik.yaml local-registry "$install_dir/"
     echo "Copied files to $install_dir"
     if [[ $PATCH_TRAEFIK -ne 0 ]]; then
         # Update the default values of REGISTRY_API_URL and REGISTRY_UI_URL in the copied Makefile

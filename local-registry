@@ -31,12 +31,24 @@ update_server() {
     (cd "${REGISTRY_COMPOSE_DIR}" && make update)
 }
 
+run_garbage_collection() {
+    echo "Running garbage collection to clean up deleted data..."
+    docker exec registry bin/registry garbage-collect --delete-untagged /etc/distribution/config.yml
+    if [[ $? -eq 0 ]]; then
+        echo "Garbage collection completed successfully"
+    else
+        echo "Garbage collection failed" >&2
+        exit 1
+    fi
+}
+
 usage() {
     cat <<'EOF'
 Usage: local-registry <command> [args]
 
 Commands:
   add <source-image> [target]         Mirror an image into the local registry using skopeo
+  list [--tags]                       List all repositories; with --tags, show tags for each
   delete-tag <repository> <tag>       Delete a specific tag
   delete-image <repository> [tags...] Delete provided tags; if none given, delete all tags
   delete-repo <repository>            Delete an entire repository (all tags)
@@ -44,6 +56,7 @@ Commands:
   start-server                        Starts the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
   stop-server                         Stops the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
   update-server                       Updates the server (Repository must exist at ${REGISTRY_COMPOSE_DIR})
+  gc                                  Run garbage collection to reclaim disk space after deletions
 
   completion-bash                     Emit bash completion script
   completion-zsh                      Emit zsh completion script
@@ -93,9 +106,9 @@ push_image() {
 get_digest() {
     local repo=$1
     local ref=$2
-    local headers
-    headers=$(curl -sSI "$(endpoint)/${repo}/manifests/${ref}") || true
-    grep -i "Docker-Content-Digest" <<<"${headers}" | awk -F': ' '{print $2}' | tr -d '\r'
+    local digest
+    digest=$(curl -sSI "$(endpoint)/${repo}/manifests/${ref}" | grep -i "^Docker-Content-Digest:" | awk '{print $2}' | tr -d '\r\n ')
+    echo "${digest}"
 }
 
 delete_tag() {
@@ -118,7 +131,108 @@ delete_tag() {
 list_tags() {
     require_jq
     local repo=$1
-    curl -sS "$(endpoint)/${repo}/tags/list" | jq -r '.tags[]?'
+    local response
+    response=$(curl -sS "$(endpoint)/${repo}/tags/list")
+    local http_code=$?
+    if [[ $http_code -ne 0 ]]; then
+        return 1
+    fi
+    local tags
+    tags=$(echo "${response}" | jq -r '.tags // empty | .[]?')
+    if [[ -z ${tags} ]]; then
+        local error_msg
+        error_msg=$(echo "${response}" | jq -r '.errors[0].message // empty')
+        if [[ -n ${error_msg} ]]; then
+            echo "API error: ${error_msg}" >&2
+            return 1
+        fi
+    fi
+    echo "${tags}"
+}
+
+list_catalog() {
+    require_jq
+    local response
+    response=$(curl -sS "$(endpoint)/_catalog")
+    local http_code=$?
+    if [[ $http_code -ne 0 ]]; then
+        echo "Failed to connect to registry" >&2
+        return 1
+    fi
+    local repos
+    repos=$(echo "${response}" | jq -r '.repositories // empty | .[]?')
+    if [[ -z ${repos} ]]; then
+        local error_msg
+        error_msg=$(echo "${response}" | jq -r '.errors[0].message // empty')
+        if [[ -n ${error_msg} ]]; then
+            echo "API error: ${error_msg}" >&2
+            return 1
+        fi
+    fi
+    echo "${repos}"
+}
+
+list_repos() {
+    local repos_output
+    repos_output=$(list_catalog 2>&1)
+    local list_exit=$?
+    if [[ $list_exit -ne 0 ]]; then
+        echo "${repos_output}" >&2
+        exit 1
+    fi
+    if [[ -z ${repos_output} ]]; then
+        echo "No repositories found"
+        return 0
+    fi
+    mapfile -t repos <<<"${repos_output}"
+    local found_any=false
+    for repo in "${repos[@]}"; do
+        local tags_output
+        tags_output=$(list_tags "${repo}" 2>&1)
+        local tags_exit=$?
+        if [[ $tags_exit -eq 0 && -n ${tags_output} ]]; then
+            found_any=true
+            echo "${repo}"
+        fi
+    done
+    if [[ ${found_any} == false ]]; then
+        echo "No repositories with tags found"
+    fi
+}
+
+list_repos_with_tags() {
+    local repos_output
+    repos_output=$(list_catalog 2>&1)
+    local list_exit=$?
+    if [[ $list_exit -ne 0 ]]; then
+        echo "${repos_output}" >&2
+        exit 1
+    fi
+    if [[ -z ${repos_output} ]]; then
+        echo "No repositories found"
+        return 0
+    fi
+    mapfile -t repos <<<"${repos_output}"
+    local found_any=false
+    for repo in "${repos[@]}"; do
+        local tags_output
+        tags_output=$(list_tags "${repo}" 2>&1)
+        local tags_exit=$?
+        if [[ $tags_exit -ne 0 ]]; then
+            continue
+        fi
+        if [[ -n ${tags_output} ]]; then
+            found_any=true
+            mapfile -t tags <<<"${tags_output}"
+            echo "${repo}:"
+            for tag in "${tags[@]}"; do
+                echo "  - ${tag}"
+            done
+        fi
+    done
+    if [[ ${found_any} == false ]]; then
+        echo "No repositories with tags found"
+    fi
 }
 
 delete_image() {
@@ -130,11 +244,16 @@ delete_image() {
     shift
     local tags=()
     if [[ $# -eq 0 ]]; then
-        mapfile -t tags < <(list_tags "${repo}")
+        local tags_output
+        if ! tags_output=$(list_tags "${repo}" 2>&1); then
+            echo "${tags_output}" >&2
+            exit 1
+        fi
+        mapfile -t tags <<<"${tags_output}"
     else
         tags=($@)
     fi
-    if [[ ${#tags[@]} -eq 0 ]]; then
+    if [[ ${#tags[@]} -eq 0 || ( ${#tags[@]} -eq 1 && -z ${tags[0]} ) ]]; then
         echo "No tags found for ${repo}" >&2
         return 0
     fi
@@ -149,13 +268,29 @@ delete_repo() {
         exit 64
     fi
     local repo=$1
-    mapfile -t tags < <(list_tags "${repo}") || true
-    if [[ ${#tags[@]} -eq 0 ]]; then
-        echo "Repository ${repo} has no tags"
-        return 0
+    local tags_output
+    if ! tags_output=$(list_tags "${repo}" 2>&1); then
+        echo "${tags_output}" >&2
+        exit 1
     fi
-    echo "Deleting repository ${repo} with tags: ${tags[*]}"
-    delete_image "${repo}" "${tags[@]}"
+    mapfile -t tags <<<"${tags_output}"
+    if [[ ${#tags[@]} -gt 0 && ! ( ${#tags[@]} -eq 1 && -z ${tags[0]} ) ]]; then
+        echo "Deleting repository ${repo} with tags: ${tags[*]}"
+        delete_image "${repo}" "${tags[@]}"
+    fi
+    
+    local repo_path="${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories/${repo}"
+    if [[ -d ${repo_path} ]]; then
+        echo "Removing repository directory: ${repo}"
+        if rm -rf "${repo_path}"; then
+            echo "Repository ${repo} completely removed"
+        else
+            echo "Warning: Could not remove repository directory" >&2
+            echo "Try running: sudo rm -rf \"${repo_path}\"" >&2
+        fi
+    else
+        echo "Repository ${repo} deleted from registry"
+    fi
 }
 
 cmd=${1:-}
@@ -173,7 +308,7 @@ _local_registry()
   local cur prev words cword
   _init_completion || return
 
-  local commands="add delete-tag delete-image delete-repo start-server stop-server update-server completion-bash completion-zsh help --help -h"
+  local commands="add list delete-tag delete-image delete-repo gc start-server stop-server update-server completion-bash completion-zsh help --help -h"
 
   case ${COMP_CWORD} in
     1)
@@ -184,6 +319,10 @@ _local_registry()
       case ${prev} in
         add)
           COMPREPLY=()
+          return
+          ;;
+        list)
+          COMPREPLY=( $(compgen -W "--tags -t" -- "${cur}") )
           return
           ;;
         delete-tag|delete-image|delete-repo)
@@ -225,7 +364,7 @@ zsh_completion() {
 
 _local_registry_complete() {
   local -a commands
-  commands=(add delete-tag delete-image delete-repo start-server stop-server update-server completion-bash completion-zsh help --help -h)
+  commands=(add list delete-tag delete-image delete-repo gc start-server stop-server update-server completion-bash completion-zsh help --help -h)
 
   local state
   _arguments \
@@ -240,6 +379,9 @@ _local_registry_complete() {
       ;;
     repo)
       case $words[2] in
+        list)
+          _values 'list options' '--tags' '-t'
+          ;;
         delete-tag|delete-image|delete-repo)
           if [[ -d ${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories ]]; then
             local repos
@@ -281,9 +423,17 @@ EOF
 
 case ${cmd} in
 add) push_image "$@" ;;
+list)
+    if [[ $# -gt 0 && ($1 == "--tags" || $1 == "-t") ]]; then
+        list_repos_with_tags
+    else
+        list_repos
+    fi
+    ;;
 delete-tag) delete_tag "$@" ;;
 delete-image) delete_image "$@" ;;
 delete-repo) delete_repo "$@" ;;
+gc | garbage-collect) run_garbage_collection ;;
 start-server) start_server ;;
 stop-server) stop_server ;;
 update-server) update_server ;;

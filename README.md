@@ -89,6 +89,9 @@ REGISTRY_UI_PORT      ?= 49159
 REGISTRY_UI_URL       ?= registry-ui.localhost
 
 REGISTRY_DATA_SOURCE  ?= ./data
+
+UID ?= $(shell id -u)
+GID ?= $(shell id -g)
 ```
 
 Key behaviors:
@@ -96,6 +99,7 @@ Key behaviors:
 - `REGISTRY_API_URL` / `REGISTRY_API_PORT` drive the registry endpoint exposed to clients.
 - `REGISTRY_UI_URL` / `REGISTRY_UI_PORT` determine the UI host/port and Traefik routing rules.
 - `REGISTRY_DATA_SOURCE` controls the Docker volume or bind mount feeding `/var/lib/registry` (default `./data`).
+- `UID` / `GID` set the user/group ownership for registry data files (defaults to current user).
 - Compose pulls the matching image tags derived from `REGISTRY_API_CONT_VER` and `REGISTRY_UI_CONT_VER`.
 
 Run `make gen-traefik` whenever you tweak any of the host/port values to rewrite `traefik.yaml` appropriately.
@@ -227,8 +231,11 @@ Before pushing from CI-like flows, log in (optional if you enable auth) and ensu
 ```bash
 ./local-registry add ghcr.io/myorg/service:latest
 ./local-registry add ghcr.io/myorg/service:latest demo/service:edge
+./local-registry list
+./local-registry list --tags
 ./local-registry delete-tag demo/service latest
 ./local-registry delete-repo demo/service
+./local-registry gc  # run garbage collection after deletions
 ```
 
 Environment knobs:
@@ -236,7 +243,9 @@ Environment knobs:
 - `REGISTRY_API_URL` / `REGISTRY_API_PORT` / `REGISTRY_DATA_SOURCE` – override registry endpoint and local data root (defaults match the Makefile).
 - `SKOPEO_DEBUG=true` – enable verbose `skopeo` logging.
 
-The `add` command uses `skopeo copy --dest-tls-verify=false`; delete commands hit the v2 API and require `jq` for tag enumeration.
+The `add` command uses `skopeo copy --dest-tls-verify=false`; `list` queries the catalog API and filters out repositories without tags; delete commands hit the v2 API and require `jq` for tag enumeration. The `delete-repo` command removes both the manifests and the repository directory. Run `gc` after deletions to reclaim disk space from unreferenced blobs.
+
+**Note on deletions:** The registry container runs as your user (configured via `UID`/`GID` in docker-compose), so `delete-repo` can fully remove repository directories without requiring sudo. The `list` command automatically hides repositories without tags.
 
 #### Shell completions
 

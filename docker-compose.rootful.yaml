@@ -2,6 +2,7 @@ services:
   registry:
     image: ghcr.io/distribution/distribution:${REGISTRY_API_CONT_VER}
     container_name: registry
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       OTEL_TRACES_EXPORTER: none
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
