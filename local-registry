@@ -49,7 +49,7 @@ Commands:
   completion-zsh                      Emit zsh completion script
 
 Environment overrides:
-  REGISTRY_API_URL, REGISTRY_API_PORT   Registry endpoint (defaults: registry-api.localhost:50000)
+  REGISTRY_API_URL, REGISTRY_API_PORT   Registry endpoint (defaults: registry.localhost:50000)
   REGISTRY_COMPOSE_DIR                  Directory with Makefile providing start/stop/update targets
   SKOPEO_DEBUG=true                     Enable verbose skopeo logging
 EOF

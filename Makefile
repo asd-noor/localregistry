@@ -42,8 +42,8 @@ gen-traefik:
 	@command -v yq >/dev/null 2>&1 || { echo "missing dependency: yq" >&2; exit 1; }
 	@API_URL="$(REGISTRY_API_URL)"; \
 	UI_URL="$(REGISTRY_UI_URL)"; \
-	[ "$$API_URL" = "localhost" ] && API_URL="registry-api.localhost"; \
-	[ "$$UI_URL" = "localhost" ] && UI_URL="registry.localhost"; \
+	[ "$$API_URL" = "localhost" ] && API_URL="registry.localhost"; \
+	[ "$$UI_URL" = "localhost" ] && UI_URL="registry-ui.localhost"; \
 	export REGISTRY_API_URL="$$API_URL"; \
 	export REGISTRY_UI_URL="$$UI_URL"; \
 	yq eval -i '.http.routers.registry.rule = "Host(`" + strenv(REGISTRY_API_URL) + "`)"' traefik.yaml; \

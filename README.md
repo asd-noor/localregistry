@@ -82,11 +82,11 @@ Environment-driven knobs live in the top of the `Makefile`:
 ```makefile
 REGISTRY_API_CONT_VER ?= 3.0.0
 REGISTRY_API_PORT     ?= 50000
-REGISTRY_API_URL      ?= registry-api.localhost
+REGISTRY_API_URL      ?= registry.localhost
 
 REGISTRY_UI_CONT_VER  ?= 2.0.0
 REGISTRY_UI_PORT      ?= 49159
-REGISTRY_UI_URL       ?= registry.localhost
+REGISTRY_UI_URL       ?= registry-ui.localhost
 
 REGISTRY_DATA_SOURCE  ?= ./data
 ```
@@ -103,7 +103,7 @@ Run `make gen-traefik` whenever you tweak any of the host/port values to rewrite
 ## Bootstrapping the Stack
 
 ```bash
-make patch-docker-config   # Add registry-api.localhost:50000 to insecure registries
+make patch-docker-config   # Add registry.localhost:50000 to insecure registries
 make start                 # docker compose up -d
 # or: make run (foreground)
 ```
@@ -112,15 +112,15 @@ make start                 # docker compose up -d
 
 - Registry starts with deletion enabled and CORS headers set for the UI origin.
 - UI points at the registry via an internal proxy (`NGINX_PROXY_PASS_URL=http://registry:5000`).
-- `PULL_URL` surfaces the correct CLI endpoint (e.g. `registry-api.localhost:50000`).
+- `PULL_URL` surfaces the correct CLI endpoint (e.g. `registry.localhost:50000`).
 
 ## Validating
 
-1. Visit `http://registry.localhost` – you should see catalog results (empty if unused).
+1. Visit `http://registry-ui.localhost` – you should see catalog results (empty if unused).
 2. Push an image, e.g.:
    ```bash
-   docker tag alpine registry-api.localhost:50000/demo/alpine:latest
-   docker push registry-api.localhost:50000/demo/alpine:latest
+   docker tag alpine registry.localhost:50000/demo/alpine:latest
+   docker push registry.localhost:50000/demo/alpine:latest
    ```
 3. Refresh the UI; the image should appear and be deletable (`DELETE_IMAGES=true`).
 
@@ -140,7 +140,7 @@ kind nodes run inside Docker and need two considerations:
      - |-
        [plugins."io.containerd.grpc.v1.cri".registry]
          [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-           [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry-api.localhost:${REGISTRY_API_PORT}"]
+           [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.localhost:${REGISTRY_API_PORT}"]
              endpoint = ["http://host.docker.internal:${REGISTRY_API_PORT}"]
    EOF
    ```
@@ -152,7 +152,7 @@ kind nodes run inside Docker and need two considerations:
    Add a `docker-registry` secret or use image pull specs like:
 
    ```yaml
-   image: registry-api.localhost:50000/demo/alpine:latest
+   image: registry.localhost:50000/demo/alpine:latest
    imagePullPolicy: IfNotPresent
    ```
 
@@ -165,9 +165,9 @@ Patch running clusters by logging onto each node and editing `/etc/containerd/ce
 ```bash
 for node in $(kind get nodes --name local-registry); do
   docker exec "$node" /bin/sh -c '
-    mkdir -p /etc/containerd/certs.d/registry-api.localhost:${REGISTRY_API_PORT} &&
-    cat <<EOF >/etc/containerd/certs.d/registry-api.localhost:${REGISTRY_API_PORT}/hosts.toml
-server = "http://registry-api.localhost:${REGISTRY_API_PORT}"
+    mkdir -p /etc/containerd/certs.d/registry.localhost:${REGISTRY_API_PORT} &&
+    cat <<EOF >/etc/containerd/certs.d/registry.localhost:${REGISTRY_API_PORT}/hosts.toml
+server = "http://registry.localhost:${REGISTRY_API_PORT}"
 [host."http://host.docker.internal:${REGISTRY_API_PORT}"]
   capabilities = ["pull", "resolve"]
 EOF
@@ -194,7 +194,7 @@ k3d cluster create dev \
 ```bash
 > cat <<EOF >k3d-registry.yaml
 mirrors:
-  "registry-api.localhost:${REGISTRY_API_PORT}":
+  "registry.localhost:${REGISTRY_API_PORT}":
     endpoint:
       - "http://host.docker.internal:${REGISTRY_API_PORT}"
 EOF
@@ -204,7 +204,7 @@ EOF
 
 - For Linux hosts, replace `host.docker.internal` with the Docker bridge IP.
 
-Once the cluster is live, reference images via `registry-api.localhost:50000/...` in workloads or Helm charts.
+Once the cluster is live, reference images via `registry.localhost:50000/...` in workloads or Helm charts.
 
 ## Reusing the registry across Docker Compose stacks
 
@@ -214,7 +214,7 @@ Any Compose application can target the registry by adding:
 services:
   backend:
     build: .
-    image: registry-api.localhost:${REGISTRY_API_PORT}/my-app/backend:latest
+    image: registry.localhost:${REGISTRY_API_PORT}/my-app/backend:latest
     push: true
 ```
 
@@ -266,3 +266,4 @@ Add the `eval` line to your shell profile for automatic setup.
 - To upgrade versions, adjust `REGISTRY_API_CONT_VER` / `REGISTRY_UI_CONT_VER`, regenerate Traefik, and `make update && make start`.
 
 Happy shipping!
+

@@ -1,10 +1,10 @@
 http:
   routers:
     registry:
-      rule: "Host(`registry-api.localhost`)"
+      rule: "Host(`registry.localhost`)"
       service: registry
     registry-ui:
-      rule: "Host(`registry.localhost`)"
+      rule: "Host(`registry-ui.localhost`)"
       service: registry-ui
   services:
     registry:
