@@ -102,7 +102,18 @@ push_image() {
     if [[ ${SKOPEO_DEBUG:-} == "true" ]]; then
         skopeo_opts+=(--debug)
     fi
-    skopeo copy "${skopeo_opts[@]}" "docker://${source}" "docker://${dest}"
+    
+    # Check if image exists locally in Docker
+    local source_uri
+    if docker image inspect "${source}" >/dev/null 2>&1; then
+        echo "Found ${source} locally, copying from Docker daemon..."
+        source_uri="docker-daemon:${source}"
+    else
+        echo "Image ${source} not found locally, pulling from registry..."
+        source_uri="docker://${source}"
+    fi
+    
+    skopeo copy "${skopeo_opts[@]}" "${source_uri}" "docker://${dest}"
     echo "Added ${source} -> ${dest}"
 }
 
