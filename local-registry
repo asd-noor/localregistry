@@ -199,19 +199,15 @@ list_repos() {
         return 0
     fi
     mapfile -t repos <<<"${repos_output}"
-    local found_any=false
     for repo in "${repos[@]}"; do
-        local tags_output
-        tags_output=$(list_tags "${repo}" 2>&1)
-        local tags_exit=$?
+        local tags_output tags_exit=0
+        tags_output=$(list_tags "${repo}" 2>&1) || tags_exit=$?
         if [[ $tags_exit -eq 0 && -n ${tags_output} ]]; then
-            found_any=true
             echo "${repo}"
+        else
+            echo "${repo} (Removed)"
         fi
     done
-    if [[ ${found_any} == false ]]; then
-        echo "No repositories with tags found"
-    fi
 }
 
 list_repos_with_tags() {
@@ -227,26 +223,23 @@ list_repos_with_tags() {
         return 0
     fi
     mapfile -t repos <<<"${repos_output}"
-    local found_any=false
     for repo in "${repos[@]}"; do
-        local tags_output
-        tags_output=$(list_tags "${repo}" 2>&1)
-        local tags_exit=$?
+        local tags_output tags_exit=0
+        tags_output=$(list_tags "${repo}" 2>&1) || tags_exit=$?
         if [[ $tags_exit -ne 0 ]]; then
+            echo "${repo}: (Removed)"
             continue
         fi
         if [[ -n ${tags_output} ]]; then
-            found_any=true
             mapfile -t tags <<<"${tags_output}"
             echo "${repo}:"
             for tag in "${tags[@]}"; do
                 echo "  - ${tag}"
             done
+        else
+            echo "${repo}: (Removed)"
         fi
     done
-    if [[ ${found_any} == false ]]; then
-        echo "No repositories with tags found"
-    fi
 }
 
 delete_image() {
