@@ -3,9 +3,12 @@ set -euo pipefail
 
 : "${REGISTRY_API_URL:=localhost}"
 : "${REGISTRY_API_PORT:=50000}"
-: "${REGISTRY_DATA_SOURCE:=./data}"
-
 : "${REGISTRY_COMPOSE_DIR:=}"
+
+[[ -z "$REGISTRY_COMPOSE_DIR" ]] && {
+    echo "REGISTRY_COMPOSE_DIR unset, exiting."
+    exit 1
+}
 
 start_server() {
     if [[ -z ${REGISTRY_COMPOSE_DIR} ]]; then
@@ -33,7 +36,7 @@ update_server() {
 
 run_garbage_collection() {
     echo "Running garbage collection to clean up deleted data..."
-    docker exec registry bin/registry garbage-collect --delete-untagged /etc/distribution/config.yml
+    docker compose -f "${REGISTRY_COMPOSE_DIR}/docker-compose.yaml" exec registry bin/registry garbage-collect --delete-untagged /etc/distribution/config.yml
     if [[ $? -eq 0 ]]; then
         echo "Garbage collection completed successfully"
     else
@@ -253,13 +256,16 @@ delete_image() {
     else
         tags=($@)
     fi
-    if [[ ${#tags[@]} -eq 0 || ( ${#tags[@]} -eq 1 && -z ${tags[0]} ) ]]; then
+    if [[ ${#tags[@]} -eq 0 || (${#tags[@]} -eq 1 && -z ${tags[0]}) ]]; then
         echo "No tags found for ${repo}" >&2
         return 0
     fi
     for tag in "${tags[@]}"; do
         delete_tag "${repo}" "${tag}"
     done
+
+    # Run garbage collection to reclaim disk space
+    run_garbage_collection
 }
 
 delete_repo() {
@@ -274,23 +280,26 @@ delete_repo() {
         exit 1
     fi
     mapfile -t tags <<<"${tags_output}"
-    if [[ ${#tags[@]} -gt 0 && ! ( ${#tags[@]} -eq 1 && -z ${tags[0]} ) ]]; then
+    if [[ ${#tags[@]} -gt 0 && ! (${#tags[@]} -eq 1 && -z ${tags[0]}) ]]; then
         echo "Deleting repository ${repo} with tags: ${tags[*]}"
-        delete_image "${repo}" "${tags[@]}"
+        # Delete tags without running GC (we'll do it once at the end)
+        for tag in "${tags[@]}"; do
+            delete_tag "${repo}" "${tag}"
+        done
     fi
-    
-    local repo_path="${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories/${repo}"
-    if [[ -d ${repo_path} ]]; then
-        echo "Removing repository directory: ${repo}"
-        if rm -rf "${repo_path}"; then
-            echo "Repository ${repo} completely removed"
-        else
-            echo "Warning: Could not remove repository directory" >&2
-            echo "Try running: sudo rm -rf \"${repo_path}\"" >&2
-        fi
+
+    # Remove repository directory using docker exec
+    local container_repo_path="/var/lib/registry/docker/registry/v2/repositories/${repo}"
+    echo "Removing repository directory: ${repo}"
+    if docker compose -f "${REGISTRY_COMPOSE_DIR}/docker-compose.yaml" exec registry rm -rf "${container_repo_path}" 2>/dev/null; then
+        echo "Repository ${repo} completely removed"
     else
-        echo "Repository ${repo} deleted from registry"
+        echo "Warning: Could not remove repository directory via docker exec" >&2
+        echo "Container may not be running or path may not exist" >&2
     fi
+
+    # Run garbage collection to reclaim disk space
+    run_garbage_collection
 }
 
 cmd=${1:-}
@@ -326,9 +335,9 @@ _local_registry()
           return
           ;;
         delete-tag|delete-image|delete-repo)
-          if [[ -d ${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories ]]; then
+          if [[ -d ${REGISTRY_COMPOSE_DIR}/data/docker/registry/v2/repositories ]]; then
             local repos
-            repos=$(find "${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n')
+            repos=$(find "${REGISTRY_COMPOSE_DIR}/data/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n')
             COMPREPLY=( $(compgen -W "${repos}" -- "${cur}") )
           fi
           return
@@ -383,9 +392,9 @@ _local_registry_complete() {
           _values 'list options' '--tags' '-t'
           ;;
         delete-tag|delete-image|delete-repo)
-          if [[ -d ${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories ]]; then
+          if [[ -d ${REGISTRY_COMPOSE_DIR}/data/docker/registry/v2/repositories ]]; then
             local repos
-            repos=($(find "${REGISTRY_DATA_SOURCE}/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n'))
+            repos=($(find "${REGISTRY_COMPOSE_DIR}/data/docker/registry/v2/repositories" -maxdepth 1 -mindepth 1 -type d -printf '%f\n'))
             _values 'repositories' $repos
           else
             _message 'repository name'

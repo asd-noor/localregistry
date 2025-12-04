@@ -8,7 +8,7 @@ install_dir="${INSTALL_DIR:-$(pwd)}"
 if [[ "$install_dir" != "$PWD" ]]; then
     mkdir -p "$install_dir"
     # Copy only necessary files (adjust patterns as needed)
-    cp -v Makefile docker-compose.rootful.yaml docker-compose.rootless.yaml traefik.yaml local-registry "$install_dir/"
+    cp -v Makefile docker-compose.yaml traefik.yaml local-registry "$install_dir/"
     echo "Copied files to $install_dir"
     if [[ $PATCH_TRAEFIK -ne 0 ]]; then
         # Update the default values of REGISTRY_API_URL and REGISTRY_UI_URL in the copied Makefile
@@ -29,13 +29,10 @@ fi
 # Export all registry environment variables to shell profiles (idempotent)
 declare -a export_lines=(
     "export REGISTRY_COMPOSE_DIR=\"${install_dir}\""
-    "export REGISTRY_DATA_SOURCE=\"\${REGISTRY_DATA_SOURCE:-${install_dir}/data}\""
     "export REGISTRY_API_URL=\"\${REGISTRY_API_URL:-${REGISTRY_API_URL:-localhost}}\""
     "export REGISTRY_API_PORT=\"\${REGISTRY_API_PORT:-${REGISTRY_API_PORT:-50000}}\""
     "export REGISTRY_UI_URL=\"\${REGISTRY_UI_URL:-${REGISTRY_UI_URL:-localhost}}\""
     "export REGISTRY_UI_PORT=\"\${REGISTRY_UI_PORT:-${REGISTRY_UI_PORT:-49159}}\""
-    "export REGISTRY_API_CONT_VER=\"\${REGISTRY_API_CONT_VER:-${REGISTRY_API_CONT_VER:-latest}}\""
-    "export REGISTRY_UI_CONT_VER=\"\${REGISTRY_UI_CONT_VER:-${REGISTRY_UI_CONT_VER:-latest}}\""
 )
 
 for rcfile in "$HOME/.zshenv" "$HOME/.bashrc"; do

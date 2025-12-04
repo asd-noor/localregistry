@@ -80,27 +80,21 @@ When `PATCH_TRAEFIK=1`, the installer updates `REGISTRY_API_URL` and `REGISTRY_U
 Environment-driven knobs live in the top of the `Makefile`:
 
 ```makefile
-REGISTRY_API_CONT_VER ?= 3.0.0
-REGISTRY_API_PORT     ?= 50000
-REGISTRY_API_URL      ?= registry.localhost
+REGISTRY_COMPOSE_DIR ?= $(CURDIR)
 
-REGISTRY_UI_CONT_VER  ?= 2.0.0
-REGISTRY_UI_PORT      ?= 49159
-REGISTRY_UI_URL       ?= registry-ui.localhost
+REGISTRY_API_URL  ?= localhost
+REGISTRY_API_PORT ?= 50000
 
-REGISTRY_DATA_SOURCE  ?= ./data
-
-UID ?= $(shell id -u)
-GID ?= $(shell id -g)
+REGISTRY_UI_URL  ?= localhost
+REGISTRY_UI_PORT ?= 49159
 ```
 
 Key behaviors:
 
+- `REGISTRY_COMPOSE_DIR` points to the directory containing the compose stack (defaults to current directory).
 - `REGISTRY_API_URL` / `REGISTRY_API_PORT` drive the registry endpoint exposed to clients.
 - `REGISTRY_UI_URL` / `REGISTRY_UI_PORT` determine the UI host/port and Traefik routing rules.
-- `REGISTRY_DATA_SOURCE` controls the Docker volume or bind mount feeding `/var/lib/registry` (default `./data`).
-- `UID` / `GID` set the user/group ownership for registry data files (defaults to current user).
-- Compose pulls the matching image tags derived from `REGISTRY_API_CONT_VER` and `REGISTRY_UI_CONT_VER`.
+- Container images are pinned to `latest` in `docker-compose.yaml`. To use specific versions, modify the image tags directly in the compose file.
 
 Run `make gen-traefik` whenever you tweak any of the host/port values to rewrite `traefik.yaml` appropriately.
 
@@ -240,12 +234,13 @@ Before pushing from CI-like flows, log in (optional if you enable auth) and ensu
 
 Environment knobs:
 
-- `REGISTRY_API_URL` / `REGISTRY_API_PORT` / `REGISTRY_DATA_SOURCE` – override registry endpoint and local data root (defaults match the Makefile).
+- `REGISTRY_API_URL` / `REGISTRY_API_PORT` – override registry endpoint (defaults match the Makefile).
+- `REGISTRY_COMPOSE_DIR` – path to the directory containing `docker-compose.yaml` (required for server operations and `delete-repo`).
 - `SKOPEO_DEBUG=true` – enable verbose `skopeo` logging.
 
-The `add` command uses `skopeo copy --dest-tls-verify=false`; `list` queries the catalog API and filters out repositories without tags; delete commands hit the v2 API and require `jq` for tag enumeration. The `delete-repo` command removes both the manifests and the repository directory. Run `gc` after deletions to reclaim disk space from unreferenced blobs.
+The `add` command uses `skopeo copy --dest-tls-verify=false`; `list` queries the catalog API and filters out repositories without tags; delete commands hit the v2 API and require `jq` for tag enumeration. The `delete-repo` command removes both the manifests via the API and the repository directory from inside the registry container using `docker compose exec`. Run `gc` after deletions to reclaim disk space from unreferenced blobs.
 
-**Note on deletions:** The registry container runs as your user (configured via `UID`/`GID` in docker-compose), so `delete-repo` can fully remove repository directories without requiring sudo. The `list` command automatically hides repositories without tags.
+**Note on deletions:** The `delete-repo` command uses `docker compose exec` to remove repository directories from inside the running registry container, ensuring proper permissions and consistency. The `list` command automatically hides repositories without tags.
 
 #### Shell completions
 
@@ -272,7 +267,7 @@ Add the `eval` line to your shell profile for automatic setup.
 
 - `make stop` takes down the compose stack.
 - `make update` pulls new container images.
-- To upgrade versions, adjust `REGISTRY_API_CONT_VER` / `REGISTRY_UI_CONT_VER`, regenerate Traefik, and `make update && make start`.
+- To upgrade container versions, modify the image tags in `docker-compose.yaml`, then run `make update && make start`.
 
 Happy shipping!
 

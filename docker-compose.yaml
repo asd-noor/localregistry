@@ -1,8 +1,7 @@
 services:
   registry:
-    image: ghcr.io/distribution/distribution:${REGISTRY_API_CONT_VER}
+    image: ghcr.io/distribution/distribution:latest
     container_name: registry
-    user: "${UID:-1000}:${GID:-1000}"
     environment:
       OTEL_TRACES_EXPORTER: none
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
@@ -13,10 +12,10 @@ services:
     ports:
       - "${REGISTRY_API_PORT}:5000"
     volumes:
-      - ${REGISTRY_DATA_SOURCE}:/var/lib/registry
+      - ${REGISTRY_COMPOSE_DIR}/data:/var/lib/registry
 
   ui:
-    image: joxit/docker-registry-ui:${REGISTRY_UI_CONT_VER}
+    image: joxit/docker-registry-ui:latest
     container_name: registry-ui
     environment:
       REGISTRY_URL: http://${REGISTRY_UI_URL}
