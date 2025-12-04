@@ -57,5 +57,5 @@ chmod +x "${HOME}/.local/bin/local-registry"
 echo "✓ Installed local-registry to ${HOME}/.local/bin"
 echo "  Ensure ${HOME}/.local/bin is in your \$PATH"
 
-printf "For bash completions, add %s in your in your bashrc\n" 'eval "$(local-registry completion-bash)"'
+printf "\nFor bash completions, add %s in your in your bashrc\n" 'eval "$(local-registry completion-bash)"'
 printf "For zsh completions, add %s in your in your zshrc\n" 'eval "$(local-registry completion-zsh)"'
