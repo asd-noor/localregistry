@@ -43,6 +43,37 @@ run_garbage_collection() {
         echo "Garbage collection failed" >&2
         exit 1
     fi
+    
+    # Clean up empty repository directories
+    echo "Removing empty repository directories..."
+    local repos_output repos_removed=0
+    repos_output=$(list_catalog 2>&1)
+    if [[ $? -eq 0 && -n ${repos_output} ]]; then
+        mapfile -t repos <<<"${repos_output}"
+        local empty_repos=()
+        # First, identify all empty repositories
+        for repo in "${repos[@]}"; do
+            local tags_output tags_exit=0
+            tags_output=$(list_tags "${repo}" 2>&1) || tags_exit=$?
+            # If repository has no tags, mark for removal
+            if [[ $tags_exit -ne 0 ]] || [[ -z ${tags_output} ]]; then
+                empty_repos+=("${repo}")
+            fi
+        done
+        # Then remove all empty repositories
+        for repo in "${empty_repos[@]}"; do
+            local container_repo_path="/var/lib/registry/docker/registry/v2/repositories/${repo}"
+            if docker compose -f "${REGISTRY_COMPOSE_DIR}/docker-compose.yaml" exec registry rm -rf "${container_repo_path}" 2>/dev/null; then
+                echo "  Removed empty repository: ${repo}"
+                ((repos_removed++))
+            fi
+        done
+    fi
+    if [[ $repos_removed -gt 0 ]]; then
+        echo "Removed ${repos_removed} empty repository directories"
+    else
+        echo "No empty repositories to clean up"
+    fi
 }
 
 usage() {
