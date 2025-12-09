@@ -18,14 +18,6 @@ const (
 	TransportDocker Transport = "docker://"
 	// TransportDockerDaemon is the docker-daemon: transport for local Docker daemon.
 	TransportDockerDaemon Transport = "docker-daemon:"
-	// TransportDockerArchive is the docker-archive: transport for docker save format.
-	TransportDockerArchive Transport = "docker-archive:"
-	// TransportOCI is the oci: transport for OCI layout directories.
-	TransportOCI Transport = "oci:"
-	// TransportDir is the dir: transport for directory storage.
-	TransportDir Transport = "dir:"
-	// TransportContainersStorage is the containers-storage: transport.
-	TransportContainersStorage Transport = "containers-storage:"
 )
 
 // SkopeoConfig holds configuration for skopeo operations.
@@ -76,37 +68,6 @@ type InspectOptions struct {
 	Creds *Credentials
 	// TLSVerify enables TLS verification (default: true).
 	TLSVerify *bool
-	// Raw returns raw manifest instead of parsed output.
-	Raw bool
-	// Config returns image configuration instead of manifest.
-	Config bool
-}
-
-// DeleteOptions configures an image delete operation.
-type DeleteOptions struct {
-	// Creds for authentication.
-	Creds *Credentials
-	// TLSVerify enables TLS verification (default: true).
-	TLSVerify *bool
-}
-
-// SyncOptions configures a registry sync operation.
-type SyncOptions struct {
-	// SrcCreds for source authentication.
-	SrcCreds *Credentials
-	// DestCreds for destination authentication.
-	DestCreds *Credentials
-
-	// SrcTLSVerify enables TLS verification for source.
-	SrcTLSVerify *bool
-	// DestTLSVerify enables TLS verification for destination.
-	DestTLSVerify *bool
-
-	// All syncs all images including multi-arch.
-	All bool
-
-	// DryRun shows what would be synced without syncing.
-	DryRun bool
 }
 
 // ImageInfo represents the result of an image inspection.
@@ -193,51 +154,6 @@ func (s *Skopeo) Copy(ctx context.Context, src, dest string, opts *CopyOptions) 
 	return s.run(ctx, args)
 }
 
-// Pull copies an image from a remote registry to the local Docker daemon.
-// This is a convenience wrapper around Copy with docker-daemon: destination.
-func (s *Skopeo) Pull(ctx context.Context, image string, opts *CopyOptions) error {
-	src := ImageRef(TransportDocker, image)
-	// For docker-daemon, the reference format is docker-daemon:image:tag
-	dest := ImageRef(TransportDockerDaemon, image)
-	return s.Copy(ctx, src, dest, opts)
-}
-
-// Push copies an image from the local Docker daemon to a remote registry.
-// This is a convenience wrapper around Copy with docker-daemon: source.
-func (s *Skopeo) Push(ctx context.Context, localImage, remoteImage string, opts *CopyOptions) error {
-	src := ImageRef(TransportDockerDaemon, localImage)
-	dest := ImageRef(TransportDocker, remoteImage)
-	return s.Copy(ctx, src, dest, opts)
-}
-
-// CopyToDir copies an image to a local directory.
-func (s *Skopeo) CopyToDir(ctx context.Context, image, dir string, opts *CopyOptions) error {
-	src := ImageRef(TransportDocker, image)
-	dest := ImageRef(TransportDir, dir)
-	return s.Copy(ctx, src, dest, opts)
-}
-
-// CopyToOCI copies an image to a local OCI layout directory.
-func (s *Skopeo) CopyToOCI(ctx context.Context, image, path, tag string, opts *CopyOptions) error {
-	src := ImageRef(TransportDocker, image)
-	dest := fmt.Sprintf("%s%s:%s", TransportOCI, path, tag)
-	return s.Copy(ctx, src, dest, opts)
-}
-
-// CopyFromArchive copies an image from a docker-archive file to a registry.
-func (s *Skopeo) CopyFromArchive(ctx context.Context, archivePath, destImage string, opts *CopyOptions) error {
-	src := ImageRef(TransportDockerArchive, archivePath)
-	dest := ImageRef(TransportDocker, destImage)
-	return s.Copy(ctx, src, dest, opts)
-}
-
-// CopyToArchive copies an image to a docker-archive file.
-func (s *Skopeo) CopyToArchive(ctx context.Context, image, archivePath string, opts *CopyOptions) error {
-	src := ImageRef(TransportDocker, image)
-	dest := ImageRef(TransportDockerArchive, archivePath)
-	return s.Copy(ctx, src, dest, opts)
-}
-
 // Inspect retrieves information about an image.
 func (s *Skopeo) Inspect(ctx context.Context, image string, opts *InspectOptions) (*ImageInfo, error) {
 	args := []string{"inspect"}
@@ -248,12 +164,6 @@ func (s *Skopeo) Inspect(ctx context.Context, image string, opts *InspectOptions
 		}
 		if opts.TLSVerify != nil {
 			args = append(args, fmt.Sprintf("--tls-verify=%t", *opts.TLSVerify))
-		}
-		if opts.Raw {
-			args = append(args, "--raw")
-		}
-		if opts.Config {
-			args = append(args, "--config")
 		}
 	}
 
@@ -272,150 +182,12 @@ func (s *Skopeo) Inspect(ctx context.Context, image string, opts *InspectOptions
 		return nil, err
 	}
 
-	// If raw output requested, we can't parse it as ImageInfo
-	if opts != nil && opts.Raw {
-		return &ImageInfo{Name: image}, nil
-	}
-
 	var info ImageInfo
 	if err := json.Unmarshal(output, &info); err != nil {
 		return nil, fmt.Errorf("failed to parse inspect output: %w", err)
 	}
 
 	return &info, nil
-}
-
-// InspectRaw retrieves the raw manifest of an image.
-func (s *Skopeo) InspectRaw(ctx context.Context, image string, opts *InspectOptions) ([]byte, error) {
-	if opts == nil {
-		opts = &InspectOptions{}
-	}
-	opts.Raw = true
-
-	args := []string{"inspect", "--raw"}
-
-	if opts.Creds != nil {
-		args = append(args, "--creds", formatCreds(opts.Creds))
-	}
-	if opts.TLSVerify != nil {
-		args = append(args, fmt.Sprintf("--tls-verify=%t", *opts.TLSVerify))
-	}
-
-	if s.config.InsecurePolicy {
-		args = append(args, "--insecure-policy")
-	}
-
-	if !hasTransportPrefix(image) {
-		image = ImageRef(TransportDocker, image)
-	}
-	args = append(args, image)
-
-	return s.runOutput(ctx, args)
-}
-
-// Delete removes an image from a registry.
-func (s *Skopeo) Delete(ctx context.Context, image string, opts *DeleteOptions) error {
-	args := []string{"delete"}
-
-	if opts != nil {
-		if opts.Creds != nil {
-			args = append(args, "--creds", formatCreds(opts.Creds))
-		}
-		if opts.TLSVerify != nil {
-			args = append(args, fmt.Sprintf("--tls-verify=%t", *opts.TLSVerify))
-		}
-	}
-
-	if s.config.InsecurePolicy {
-		args = append(args, "--insecure-policy")
-	}
-
-	if !hasTransportPrefix(image) {
-		image = ImageRef(TransportDocker, image)
-	}
-	args = append(args, image)
-
-	return s.run(ctx, args)
-}
-
-// ListTags returns a list of tags for the given repository.
-func (s *Skopeo) ListTags(ctx context.Context, repo string, creds *Credentials, tlsVerify *bool) ([]string, error) {
-	args := []string{"list-tags"}
-
-	if creds != nil {
-		args = append(args, "--creds", formatCreds(creds))
-	}
-	if tlsVerify != nil {
-		args = append(args, fmt.Sprintf("--tls-verify=%t", *tlsVerify))
-	}
-
-	if s.config.InsecurePolicy {
-		args = append(args, "--insecure-policy")
-	}
-
-	if !hasTransportPrefix(repo) {
-		repo = ImageRef(TransportDocker, repo)
-	}
-	args = append(args, repo)
-
-	output, err := s.runOutput(ctx, args)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Repository string   `json:"Repository"`
-		Tags       []string `json:"Tags"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse list-tags output: %w", err)
-	}
-
-	return result.Tags, nil
-}
-
-// Sync synchronizes images between a source and destination.
-func (s *Skopeo) Sync(ctx context.Context, srcType, src, destType, dest string, opts *SyncOptions) error {
-	args := []string{"sync", "--src", srcType, "--dest", destType}
-
-	if opts != nil {
-		if opts.SrcCreds != nil {
-			args = append(args, "--src-creds", formatCreds(opts.SrcCreds))
-		}
-		if opts.DestCreds != nil {
-			args = append(args, "--dest-creds", formatCreds(opts.DestCreds))
-		}
-		if opts.SrcTLSVerify != nil {
-			args = append(args, fmt.Sprintf("--src-tls-verify=%t", *opts.SrcTLSVerify))
-		}
-		if opts.DestTLSVerify != nil {
-			args = append(args, fmt.Sprintf("--dest-tls-verify=%t", *opts.DestTLSVerify))
-		}
-		if opts.All {
-			args = append(args, "--all")
-		}
-		if opts.DryRun {
-			args = append(args, "--dry-run")
-		}
-	}
-
-	if s.config.InsecurePolicy {
-		args = append(args, "--insecure-policy")
-	}
-
-	args = append(args, src, dest)
-
-	return s.run(ctx, args)
-}
-
-// SyncFromRegistry syncs images from a registry to a local directory.
-func (s *Skopeo) SyncFromRegistry(ctx context.Context, registry, destDir string, opts *SyncOptions) error {
-	return s.Sync(ctx, "docker", registry, "dir", destDir, opts)
-}
-
-// SyncToRegistry syncs images from a local directory to a registry.
-func (s *Skopeo) SyncToRegistry(ctx context.Context, srcDir, registry string, opts *SyncOptions) error {
-	return s.Sync(ctx, "dir", srcDir, "docker", registry, opts)
 }
 
 // Version returns the skopeo version.
@@ -484,20 +256,8 @@ func formatCreds(creds *Credentials) string {
 
 // hasTransportPrefix checks if the image reference already has a transport prefix.
 func hasTransportPrefix(image string) bool {
-	transports := []Transport{
-		TransportDocker,
-		TransportDockerDaemon,
-		TransportDockerArchive,
-		TransportOCI,
-		TransportDir,
-		TransportContainersStorage,
-	}
-	for _, t := range transports {
-		if strings.HasPrefix(image, string(t)) {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(image, string(TransportDocker)) ||
+		strings.HasPrefix(image, string(TransportDockerDaemon))
 }
 
 // Bool is a helper to create a pointer to a bool value.

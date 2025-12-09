@@ -899,12 +899,6 @@ func RunWithFullFeatures(client *api.Client, reg *registry.Registry, docker regi
 	return err
 }
 
-// SetLogsSource configures the Docker client and container for log viewing.
-func (m *Model) SetLogsSource(docker registry.DockerClient, containerID string) {
-	m.logsDocker = docker
-	m.logsContainer = containerID
-}
-
 // handleLogsKeyMsg handles key events in the logs view.
 func (m Model) handleLogsKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
@@ -1365,11 +1359,6 @@ func (m Model) handleHelpKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// SetRegistry configures the registry manager for server operations.
-func (m *Model) SetRegistry(reg *registry.Registry) {
-	m.registry = reg
-}
-
 // renderImageDetails renders the image details view.
 func (m Model) renderImageDetails() string {
 	if m.imageDetails == nil {
@@ -1704,10 +1693,4 @@ func determineSourceRef(source string) string {
 	}
 
 	return registry.ImageRef(registry.TransportDocker, source)
-}
-
-// SetSkopeo configures skopeo for image operations.
-func (m *Model) SetSkopeo(skopeo *registry.Skopeo, insecure bool) {
-	m.skopeo = skopeo
-	m.skopeoInsecure = insecure
 }

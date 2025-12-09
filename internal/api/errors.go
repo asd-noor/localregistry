@@ -10,24 +10,8 @@ import (
 
 // Registry API error codes as defined in the specification.
 const (
-	ErrCodeBlobUnknown         = "BLOB_UNKNOWN"
-	ErrCodeBlobUploadInvalid   = "BLOB_UPLOAD_INVALID"
-	ErrCodeBlobUploadUnknown   = "BLOB_UPLOAD_UNKNOWN"
-	ErrCodeDigestInvalid       = "DIGEST_INVALID"
-	ErrCodeManifestBlobUnknown = "MANIFEST_BLOB_UNKNOWN"
-	ErrCodeManifestInvalid     = "MANIFEST_INVALID"
-	ErrCodeManifestUnknown     = "MANIFEST_UNKNOWN"
-	ErrCodeManifestUnverified  = "MANIFEST_UNVERIFIED"
-	ErrCodeNameInvalid         = "NAME_INVALID"
-	ErrCodeNameUnknown         = "NAME_UNKNOWN"
-	ErrCodePaginationInvalid   = "PAGINATION_NUMBER_INVALID"
-	ErrCodeRangeInvalid        = "RANGE_INVALID"
-	ErrCodeSizeInvalid         = "SIZE_INVALID"
-	ErrCodeTagInvalid          = "TAG_INVALID"
-	ErrCodeUnauthorized        = "UNAUTHORIZED"
-	ErrCodeDenied              = "DENIED"
-	ErrCodeUnsupported         = "UNSUPPORTED"
-	ErrCodeTooManyRequests     = "TOOMANYREQUESTS"
+	ErrCodeManifestUnknown = "MANIFEST_UNKNOWN"
+	ErrCodeNameUnknown     = "NAME_UNKNOWN"
 )
 
 // APIError represents a single error returned by the registry API.
@@ -62,16 +46,6 @@ func (e APIErrors) Error() string {
 	return fmt.Sprintf("%s (and %d more errors)", e.Errors[0].Error(), len(e.Errors)-1)
 }
 
-// HasCode returns true if any error in the response has the given code.
-func (e APIErrors) HasCode(code string) bool {
-	for _, err := range e.Errors {
-		if err.Code == code {
-			return true
-		}
-	}
-	return false
-}
-
 // parseAPIError parses an error response from the registry API.
 func parseAPIError(resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
@@ -91,22 +65,6 @@ func parseAPIError(resp *http.Response) error {
 func IsNotFound(err error) bool {
 	if apiErrs, ok := err.(APIErrors); ok {
 		return apiErrs.StatusCode == http.StatusNotFound
-	}
-	return false
-}
-
-// IsUnauthorized returns true if the error indicates a 401 Unauthorized response.
-func IsUnauthorized(err error) bool {
-	if apiErrs, ok := err.(APIErrors); ok {
-		return apiErrs.StatusCode == http.StatusUnauthorized || apiErrs.HasCode(ErrCodeUnauthorized)
-	}
-	return false
-}
-
-// IsDenied returns true if the error indicates a 403 Forbidden response.
-func IsDenied(err error) bool {
-	if apiErrs, ok := err.(APIErrors); ok {
-		return apiErrs.StatusCode == http.StatusForbidden || apiErrs.HasCode(ErrCodeDenied)
 	}
 	return false
 }

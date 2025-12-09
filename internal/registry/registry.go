@@ -289,37 +289,6 @@ func (r *Registry) RemoveRepository(ctx context.Context, repository string) erro
 	return nil
 }
 
-// RepositoryExists checks if a repository directory exists in the registry storage.
-func (r *Registry) RepositoryExists(ctx context.Context, repository string) (bool, error) {
-	if r.containerID == "" {
-		if err := r.findContainer(ctx); err != nil {
-			return false, err
-		}
-	}
-
-	repository = strings.TrimPrefix(repository, "/")
-	repoPath := fmt.Sprintf("/var/lib/registry/docker/registry/v2/repositories/%s", repository)
-
-	result, err := r.docker.Exec(ctx, r.containerID, []string{"test", "-d", repoPath}, ExecOptions{})
-	if err != nil {
-		return false, fmt.Errorf("failed to check repository existence: %w", err)
-	}
-
-	return result.ExitCode == 0, nil
-}
-
-// Exec executes an arbitrary command inside the registry container.
-// This is a lower-level method for advanced use cases.
-func (r *Registry) Exec(ctx context.Context, cmd []string, opts ExecOptions) (*ExecResult, error) {
-	if r.containerID == "" {
-		if err := r.findContainer(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	return r.docker.Exec(ctx, r.containerID, cmd, opts)
-}
-
 // Restart restarts the registry container.
 func (r *Registry) Restart(ctx context.Context) error {
 	if r.containerID == "" {

@@ -73,20 +73,8 @@ var (
 				Background(primaryColor).
 				Bold(true)
 
-	listItemStyle = lipgloss.NewStyle().
-			PaddingLeft(2)
-
-	selectedItemStyle = lipgloss.NewStyle().
-				PaddingLeft(1).
-				Foreground(highlightColor).
-				Bold(true).
-				SetString("> ")
-
 	dimmedStyle = lipgloss.NewStyle().
 			Foreground(subtleColor)
-
-	tagStyle = lipgloss.NewStyle().
-			Foreground(secondaryColor)
 
 	digestStyle = lipgloss.NewStyle().
 			Foreground(subtleColor).
@@ -127,19 +115,12 @@ var (
 				Foreground(errorColor).
 				Bold(true)
 
-	statusUnknownStyle = lipgloss.NewStyle().
-				Foreground(warningColor)
-
 	// Image details styles
 	layerStyle = lipgloss.NewStyle().
 			Foreground(subtleColor)
 
 	sizeStyle = lipgloss.NewStyle().
 			Foreground(secondaryColor)
-
-	archStyle = lipgloss.NewStyle().
-			Foreground(primaryColor).
-			Bold(true)
 
 	// Help overlay styles
 	helpOverlayStyle = lipgloss.NewStyle().
@@ -173,20 +154,4 @@ var (
 	actionErrorStyle = lipgloss.NewStyle().
 				Foreground(errorColor).
 				Bold(true)
-
-	// Tab styles
-	activeTabStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("255")).
-			Background(primaryColor).
-			Padding(0, 2).
-			Bold(true)
-
-	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(subtleColor).
-				Background(lipgloss.Color("236")).
-				Padding(0, 2)
-
-	tabGapStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			Padding(0, 1)
 )

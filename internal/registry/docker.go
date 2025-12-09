@@ -11,13 +11,13 @@ import (
 	"github.com/docker/docker/api/types/container"
 	imageTypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // DockerClient abstracts Docker operations for testability and extensibility.
 type DockerClient interface {
 	PullImage(ctx context.Context, image string) error
-	RunContainer(ctx context.Context, image string, cmd []string) (string, error)
 	CreateContainer(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, name string) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	StopContainer(ctx context.Context, containerID string, timeout *int) error
@@ -27,17 +27,6 @@ type DockerClient interface {
 	StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
 	Exec(ctx context.Context, containerID string, cmd []string, opts ExecOptions) (*ExecResult, error)
 	ImageExists(ctx context.Context, image string) (bool, error)
-	ImageInspect(ctx context.Context, image string) (*LocalImageInfo, error)
-}
-
-// LocalImageInfo contains information about a local Docker image.
-type LocalImageInfo struct {
-	ID           string   // Image ID (sha256:...)
-	RepoTags     []string // Repository tags (e.g., ["alpine:latest"])
-	RepoDigests  []string // Repository digests
-	Size         int64    // Image size in bytes
-	Architecture string   // Image architecture (e.g., "amd64")
-	Os           string   // Operating system (e.g., "linux")
 }
 
 // LogsOptions configures container log streaming.
@@ -90,7 +79,7 @@ func NewDockerClient() (DockerClient, error) {
 func (d *dockerClient) PullImage(ctx context.Context, image string) (err error) {
 	slog.Debug("pulling docker image", "image", image)
 
-	reader, err := d.cli.ImagePull(ctx, image, imageTypes.PullOptions{}) // image.PullOptions from types/image
+	reader, err := d.cli.ImagePull(ctx, image, imageTypes.PullOptions{})
 	if err != nil {
 		slog.Error("image pull failed", "image", image, "error", err)
 		return fmt.Errorf("pull failed: %w", err)
@@ -100,25 +89,10 @@ func (d *dockerClient) PullImage(ctx context.Context, image string) (err error) 
 			err = fmt.Errorf("close failed: %w", closeErr)
 		}
 	}()
-	_, _ = io.Copy(os.Stdout, reader) // Optionally parse output for progress
+	_, _ = io.Copy(os.Stdout, reader)
 
 	slog.Debug("docker image pulled", "image", image)
 	return nil
-}
-
-// RunContainer creates and starts a container from the specified image and command.
-func (d *dockerClient) RunContainer(ctx context.Context, image string, cmd []string) (string, error) {
-	resp, err := d.cli.ContainerCreate(ctx, &container.Config{
-		Image: image,
-		Cmd:   cmd,
-	}, nil, nil, nil, "")
-	if err != nil {
-		return "", fmt.Errorf("container create failed: %w", err)
-	}
-	if err := d.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return "", fmt.Errorf("container start failed: %w", err)
-	}
-	return resp.ID, nil
 }
 
 // CreateContainer creates a container with the specified configuration.
@@ -298,7 +272,7 @@ func (d *dockerClient) ImageExists(ctx context.Context, image string) (bool, err
 
 	_, _, err := d.cli.ImageInspectWithRaw(ctx, image)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if errdefs.IsNotFound(err) {
 			slog.Debug("image not found locally", "image", image)
 			return false, nil
 		}
@@ -308,38 +282,4 @@ func (d *dockerClient) ImageExists(ctx context.Context, image string) (bool, err
 
 	slog.Debug("image exists locally", "image", image)
 	return true, nil
-}
-
-// ImageInspect returns detailed information about a local Docker image.
-// Returns nil if the image does not exist locally.
-func (d *dockerClient) ImageInspect(ctx context.Context, image string) (*LocalImageInfo, error) {
-	slog.Debug("inspecting local image", "image", image)
-
-	inspect, _, err := d.cli.ImageInspectWithRaw(ctx, image)
-	if err != nil {
-		if client.IsErrNotFound(err) {
-			slog.Debug("image not found locally", "image", image)
-			return nil, nil
-		}
-		slog.Error("image inspect failed", "image", image, "error", err)
-		return nil, fmt.Errorf("image inspect failed: %w", err)
-	}
-
-	info := &LocalImageInfo{
-		ID:           inspect.ID,
-		RepoTags:     inspect.RepoTags,
-		RepoDigests:  inspect.RepoDigests,
-		Size:         inspect.Size,
-		Architecture: inspect.Architecture,
-		Os:           inspect.Os,
-	}
-
-	slog.Debug("local image inspected",
-		"image", image,
-		"id", info.ID,
-		"tags", info.RepoTags,
-		"size", info.Size,
-	)
-
-	return info, nil
 }

@@ -100,18 +100,6 @@ func (c *Client) HeadManifest(ctx context.Context, name, reference string) (*Man
 	}, nil
 }
 
-// ManifestExists checks if a manifest exists for the given name and reference.
-func (c *Client) ManifestExists(ctx context.Context, name, reference string) (bool, error) {
-	_, err := c.HeadManifest(ctx, name, reference)
-	if err != nil {
-		if IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 // DeleteManifest deletes a manifest by name and digest.
 // Note: Manifests can only be deleted by digest, not by tag.
 func (c *Client) DeleteManifest(ctx context.Context, name, digest string) error {
