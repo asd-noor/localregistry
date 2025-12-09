@@ -46,6 +46,26 @@ type AuthConfig struct {
 	Realm        string
 }
 
+// GarbageCollectResult contains the result of a garbage collection operation.
+type GarbageCollectResult struct {
+	ExitCode int    // Exit code from the gc command
+	Output   string // Stdout from the gc command
+	Stderr   string // Stderr from the gc command
+}
+
+// RegistryInfo contains detailed information about a registry container.
+type RegistryInfo struct {
+	ContainerID   string   // Docker container ID
+	ContainerName string   // Container name
+	Image         string   // Docker image used
+	Status        string   // Container status (running, exited, etc.)
+	Running       bool     // Whether the container is running
+	StartedAt     string   // Container start time
+	Address       string   // Registry address (host:port)
+	Ports         []string // Port bindings
+	Mounts        []string // Volume mounts
+}
+
 // Registry manages a local Docker distribution registry container.
 type Registry struct {
 	config      RegistryConfig
@@ -177,6 +197,190 @@ func (r *Registry) ContainerID() string {
 // Address returns the registry address (host:port).
 func (r *Registry) Address() string {
 	return fmt.Sprintf("%s:%s", r.config.HostName, r.config.HostPort)
+}
+
+// GarbageCollect runs the registry garbage collection to reclaim disk space.
+// This executes `bin/registry garbage-collect --delete-untagged /etc/distribution/config.yml`
+// inside the registry container.
+func (r *Registry) GarbageCollect(ctx context.Context, deleteUntagged bool) (*GarbageCollectResult, error) {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	slog.Debug("running garbage collection", "container_id", r.containerID, "delete_untagged", deleteUntagged)
+
+	cmd := []string{"bin/registry", "garbage-collect", "/etc/distribution/config.yml"}
+	if deleteUntagged {
+		cmd = []string{"bin/registry", "garbage-collect", "--delete-untagged", "/etc/distribution/config.yml"}
+	}
+
+	result, err := r.docker.Exec(ctx, r.containerID, cmd, ExecOptions{})
+	if err != nil {
+		slog.Error("garbage collection exec failed", "container_id", r.containerID, "error", err)
+		return nil, fmt.Errorf("garbage collection failed: %w", err)
+	}
+
+	gcResult := &GarbageCollectResult{
+		ExitCode: result.ExitCode,
+		Output:   string(result.Stdout),
+		Stderr:   string(result.Stderr),
+	}
+
+	if result.ExitCode != 0 {
+		slog.Error("garbage collection failed",
+			"container_id", r.containerID,
+			"exit_code", result.ExitCode,
+			"stderr", gcResult.Stderr,
+		)
+		return gcResult, fmt.Errorf("garbage collection exited with code %d: %s", result.ExitCode, gcResult.Stderr)
+	}
+
+	slog.Info("garbage collection completed", "container_id", r.containerID)
+	return gcResult, nil
+}
+
+// RemoveRepository removes a repository directory from the registry storage.
+// This is used after deleting all tags via the API to fully clean up the repository.
+// The path is relative to the registry storage root (e.g., "myrepo" or "org/myrepo").
+func (r *Registry) RemoveRepository(ctx context.Context, repository string) error {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Sanitize repository path to prevent directory traversal
+	if strings.Contains(repository, "..") {
+		return fmt.Errorf("invalid repository path: contains '..'")
+	}
+	repository = strings.TrimPrefix(repository, "/")
+	if repository == "" {
+		return fmt.Errorf("invalid repository path: empty")
+	}
+
+	repoPath := fmt.Sprintf("/var/lib/registry/docker/registry/v2/repositories/%s", repository)
+
+	slog.Debug("removing repository directory",
+		"container_id", r.containerID,
+		"repository", repository,
+		"path", repoPath,
+	)
+
+	result, err := r.docker.Exec(ctx, r.containerID, []string{"rm", "-rf", repoPath}, ExecOptions{})
+	if err != nil {
+		slog.Error("remove repository exec failed", "container_id", r.containerID, "repository", repository, "error", err)
+		return fmt.Errorf("failed to remove repository %q: %w", repository, err)
+	}
+
+	if result.ExitCode != 0 {
+		errMsg := strings.TrimSpace(string(result.Stderr))
+		slog.Error("remove repository failed",
+			"container_id", r.containerID,
+			"repository", repository,
+			"exit_code", result.ExitCode,
+			"stderr", errMsg,
+		)
+		return fmt.Errorf("failed to remove repository %q: exit code %d: %s", repository, result.ExitCode, errMsg)
+	}
+
+	slog.Info("repository directory removed", "repository", repository)
+	return nil
+}
+
+// RepositoryExists checks if a repository directory exists in the registry storage.
+func (r *Registry) RepositoryExists(ctx context.Context, repository string) (bool, error) {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return false, err
+		}
+	}
+
+	repository = strings.TrimPrefix(repository, "/")
+	repoPath := fmt.Sprintf("/var/lib/registry/docker/registry/v2/repositories/%s", repository)
+
+	result, err := r.docker.Exec(ctx, r.containerID, []string{"test", "-d", repoPath}, ExecOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to check repository existence: %w", err)
+	}
+
+	return result.ExitCode == 0, nil
+}
+
+// Exec executes an arbitrary command inside the registry container.
+// This is a lower-level method for advanced use cases.
+func (r *Registry) Exec(ctx context.Context, cmd []string, opts ExecOptions) (*ExecResult, error) {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	return r.docker.Exec(ctx, r.containerID, cmd, opts)
+}
+
+// Restart restarts the registry container.
+func (r *Registry) Restart(ctx context.Context) error {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return err
+		}
+	}
+
+	slog.Debug("restarting registry container", "container_id", r.containerID)
+
+	timeout := 10
+	if err := r.docker.StopContainer(ctx, r.containerID, &timeout); err != nil {
+		slog.Error("failed to stop registry container for restart", "container_id", r.containerID, "error", err)
+		return fmt.Errorf("failed to stop registry container: %w", err)
+	}
+
+	if err := r.docker.StartContainer(ctx, r.containerID); err != nil {
+		slog.Error("failed to start registry container after restart", "container_id", r.containerID, "error", err)
+		return fmt.Errorf("failed to start registry container: %w", err)
+	}
+
+	slog.Info("registry container restarted", "container_id", r.containerID)
+	return nil
+}
+
+// Info returns detailed information about the registry container.
+func (r *Registry) Info(ctx context.Context) (*RegistryInfo, error) {
+	if r.containerID == "" {
+		if err := r.findContainer(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	inspect, err := r.docker.InspectContainer(ctx, r.containerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect registry container: %w", err)
+	}
+
+	info := &RegistryInfo{
+		ContainerID:   r.containerID,
+		ContainerName: r.config.ContainerName,
+		Image:         inspect.Config.Image,
+		Status:        inspect.State.Status,
+		Running:       inspect.State.Running,
+		StartedAt:     inspect.State.StartedAt,
+		Address:       r.Address(),
+	}
+
+	// Extract port bindings
+	for port, bindings := range inspect.NetworkSettings.Ports {
+		for _, binding := range bindings {
+			info.Ports = append(info.Ports, fmt.Sprintf("%s:%s->%s", binding.HostIP, binding.HostPort, port))
+		}
+	}
+
+	// Extract mounts
+	for _, mount := range inspect.Mounts {
+		info.Mounts = append(info.Mounts, fmt.Sprintf("%s:%s", mount.Source, mount.Destination))
+	}
+
+	return info, nil
 }
 
 func (r *Registry) findContainer(ctx context.Context) error {
