@@ -7,6 +7,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -77,21 +78,39 @@ func NewRegistry(docker DockerClient, config RegistryConfig) *Registry {
 
 // Start pulls the registry image (if needed) and starts the registry container.
 func (r *Registry) Start(ctx context.Context) error {
+	slog.Debug("starting registry container",
+		"image", r.config.Image,
+		"container_name", r.config.ContainerName,
+		"host_port", r.config.HostPort,
+	)
+
 	if err := r.docker.PullImage(ctx, r.config.Image); err != nil {
+		slog.Error("failed to pull registry image", "image", r.config.Image, "error", err)
 		return fmt.Errorf("failed to pull registry image: %w", err)
 	}
+
+	slog.Debug("pulled registry image", "image", r.config.Image)
 
 	containerConfig, hostConfig := r.buildContainerConfig()
 
 	id, err := r.docker.CreateContainer(ctx, containerConfig, hostConfig, r.config.ContainerName)
 	if err != nil {
+		slog.Error("failed to create registry container", "error", err)
 		return fmt.Errorf("failed to create registry container: %w", err)
 	}
 	r.containerID = id
 
+	slog.Debug("created registry container", "container_id", id)
+
 	if err := r.docker.StartContainer(ctx, r.containerID); err != nil {
+		slog.Error("failed to start registry container", "container_id", r.containerID, "error", err)
 		return fmt.Errorf("failed to start registry container: %w", err)
 	}
+
+	slog.Info("registry container started",
+		"container_id", r.containerID,
+		"address", r.Address(),
+	)
 
 	return nil
 }
@@ -103,10 +122,16 @@ func (r *Registry) Stop(ctx context.Context) error {
 			return err
 		}
 	}
+
+	slog.Debug("stopping registry container", "container_id", r.containerID)
+
 	timeout := 10
 	if err := r.docker.StopContainer(ctx, r.containerID, &timeout); err != nil {
+		slog.Error("failed to stop registry container", "container_id", r.containerID, "error", err)
 		return fmt.Errorf("failed to stop registry container: %w", err)
 	}
+
+	slog.Info("registry container stopped", "container_id", r.containerID)
 	return nil
 }
 
@@ -117,9 +142,15 @@ func (r *Registry) Remove(ctx context.Context, force bool) error {
 			return err
 		}
 	}
+
+	slog.Debug("removing registry container", "container_id", r.containerID, "force", force)
+
 	if err := r.docker.RemoveContainer(ctx, r.containerID, force); err != nil {
+		slog.Error("failed to remove registry container", "container_id", r.containerID, "error", err)
 		return fmt.Errorf("failed to remove registry container: %w", err)
 	}
+
+	slog.Info("registry container removed", "container_id", r.containerID)
 	r.containerID = ""
 	return nil
 }

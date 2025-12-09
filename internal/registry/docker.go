@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/docker/docker/api/types/container"
@@ -32,15 +33,20 @@ type dockerClient struct {
 func NewDockerClient() (DockerClient, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
+		slog.Error("failed to create docker client", "error", err)
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
+	slog.Debug("docker client created")
 	return &dockerClient{cli: cli}, nil
 }
 
 // PullImage pulls a Docker image from a registry.
 func (d *dockerClient) PullImage(ctx context.Context, image string) (err error) {
+	slog.Debug("pulling docker image", "image", image)
+
 	reader, err := d.cli.ImagePull(ctx, image, imageTypes.PullOptions{}) // image.PullOptions from types/image
 	if err != nil {
+		slog.Error("image pull failed", "image", image, "error", err)
 		return fmt.Errorf("pull failed: %w", err)
 	}
 	defer func() {
@@ -49,6 +55,8 @@ func (d *dockerClient) PullImage(ctx context.Context, image string) (err error) 
 		}
 	}()
 	_, _ = io.Copy(os.Stdout, reader) // Optionally parse output for progress
+
+	slog.Debug("docker image pulled", "image", image)
 	return nil
 }
 

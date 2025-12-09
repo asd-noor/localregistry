@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -501,7 +502,12 @@ func (m Model) deleteManifest(repo, digest string) tea.Cmd {
 
 // Run starts the TUI application.
 func Run(client *api.Client) error {
+	slog.Debug("starting tui application")
 	p := tea.NewProgram(New(client), tea.WithAltScreen())
 	_, err := p.Run()
+	if err != nil {
+		slog.Error("tui application error", "error", err)
+	}
+	slog.Debug("tui application exited")
 	return err
 }

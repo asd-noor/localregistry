@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -63,6 +64,12 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		userAgent = "localregistry-client/1.0"
 	}
 
+	slog.Debug("initialized api client",
+		"base_url", baseURL,
+		"timeout", timeout,
+		"has_credentials", cfg.Username != "",
+	)
+
 	return &Client{
 		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: timeout},
@@ -81,12 +88,16 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("ping failed", "error", err)
 		return fmt.Errorf("ping failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	slog.Debug("ping response", "status", resp.StatusCode)
+
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
 		if version := resp.Header.Get(apiVersionHeader); version != "" {
+			slog.Debug("registry api version", "version", version)
 			return nil
 		}
 		return nil
@@ -133,9 +144,12 @@ func (c *Client) Catalog(ctx context.Context, opts *CatalogOptions) (*CatalogRes
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("catalog request failed", "error", err)
 		return nil, "", fmt.Errorf("catalog request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	slog.Debug("catalog response", "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", parseAPIError(resp)
@@ -145,6 +159,8 @@ func (c *Client) Catalog(ctx context.Context, opts *CatalogOptions) (*CatalogRes
 	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
 		return nil, "", fmt.Errorf("failed to decode catalog response: %w", err)
 	}
+
+	slog.Debug("catalog fetched", "repository_count", len(catalog.Repositories))
 
 	nextLink := parseLinkHeader(resp.Header.Get("Link"))
 	return &catalog, nextLink, nil
@@ -206,9 +222,12 @@ func (c *Client) ListTags(ctx context.Context, name string, opts *TagsOptions) (
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("list tags request failed", "repository", name, "error", err)
 		return nil, "", fmt.Errorf("list tags request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	slog.Debug("list tags response", "repository", name, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", parseAPIError(resp)
@@ -218,6 +237,8 @@ func (c *Client) ListTags(ctx context.Context, name string, opts *TagsOptions) (
 	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
 		return nil, "", fmt.Errorf("failed to decode tags response: %w", err)
 	}
+
+	slog.Debug("tags fetched", "repository", name, "tag_count", len(tags.Tags))
 
 	nextLink := parseLinkHeader(resp.Header.Get("Link"))
 	return &tags, nextLink, nil
@@ -255,6 +276,8 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	if c.username != "" && c.password != "" {
 		req.SetBasicAuth(c.username, c.password)
 	}
+
+	slog.Debug("http request", "method", method, "url", reqURL)
 
 	return req, nil
 }

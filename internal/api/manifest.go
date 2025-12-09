@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -41,9 +42,12 @@ func (c *Client) GetManifest(ctx context.Context, name, reference string) (*Mani
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("get manifest request failed", "repository", name, "reference", reference, "error", err)
 		return nil, fmt.Errorf("get manifest request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	slog.Debug("get manifest response", "repository", name, "reference", reference, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, parseAPIError(resp)
@@ -54,9 +58,12 @@ func (c *Client) GetManifest(ctx context.Context, name, reference string) (*Mani
 		return nil, fmt.Errorf("failed to read manifest body: %w", err)
 	}
 
+	digest := resp.Header.Get(contentDigestHeader)
+	slog.Debug("manifest fetched", "repository", name, "reference", reference, "digest", digest, "size", len(body))
+
 	return &Manifest{
 		ContentType: resp.Header.Get("Content-Type"),
-		Digest:      resp.Header.Get(contentDigestHeader),
+		Digest:      digest,
 		Body:        body,
 	}, nil
 }
@@ -117,14 +124,18 @@ func (c *Client) DeleteManifest(ctx context.Context, name, digest string) error 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("delete manifest request failed", "repository", name, "digest", digest, "error", err)
 		return fmt.Errorf("delete manifest request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	slog.Debug("delete manifest response", "repository", name, "digest", digest, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusAccepted {
 		return parseAPIError(resp)
 	}
 
+	slog.Info("manifest deleted", "repository", name, "digest", digest)
 	return nil
 }
 

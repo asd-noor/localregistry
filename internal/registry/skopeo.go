@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 )
@@ -428,6 +429,8 @@ func (s *Skopeo) Version(ctx context.Context) (string, error) {
 
 // run executes a skopeo command.
 func (s *Skopeo) run(ctx context.Context, args []string) error {
+	slog.Debug("executing skopeo command", "command", args[0], "args_count", len(args))
+
 	cmd := exec.CommandContext(ctx, s.config.SkopeoPath, args...)
 
 	var stderr bytes.Buffer
@@ -436,16 +439,21 @@ func (s *Skopeo) run(ctx context.Context, args []string) error {
 	if err := cmd.Run(); err != nil {
 		errMsg := stderr.String()
 		if errMsg != "" {
+			slog.Error("skopeo command failed", "command", args[0], "stderr", errMsg)
 			return fmt.Errorf("skopeo %s failed: %s", args[0], errMsg)
 		}
+		slog.Error("skopeo command failed", "command", args[0], "error", err)
 		return fmt.Errorf("skopeo %s failed: %w", args[0], err)
 	}
 
+	slog.Debug("skopeo command succeeded", "command", args[0])
 	return nil
 }
 
 // runOutput executes a skopeo command and returns the output.
 func (s *Skopeo) runOutput(ctx context.Context, args []string) ([]byte, error) {
+	slog.Debug("executing skopeo command", "command", args[0], "args_count", len(args))
+
 	cmd := exec.CommandContext(ctx, s.config.SkopeoPath, args...)
 
 	var stdout, stderr bytes.Buffer
@@ -455,11 +463,14 @@ func (s *Skopeo) runOutput(ctx context.Context, args []string) ([]byte, error) {
 	if err := cmd.Run(); err != nil {
 		errMsg := stderr.String()
 		if errMsg != "" {
+			slog.Error("skopeo command failed", "command", args[0], "stderr", errMsg)
 			return nil, fmt.Errorf("skopeo %s failed: %s", args[0], errMsg)
 		}
+		slog.Error("skopeo command failed", "command", args[0], "error", err)
 		return nil, fmt.Errorf("skopeo %s failed: %w", args[0], err)
 	}
 
+	slog.Debug("skopeo command succeeded", "command", args[0], "output_size", stdout.Len())
 	return stdout.Bytes(), nil
 }
 

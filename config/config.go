@@ -17,6 +17,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,6 +127,23 @@ func (c *Config) Validate() error {
 	}
 	c.LogLevel = normalizedLevel
 	return nil
+}
+
+// SlogLevel returns the slog.Level corresponding to the configured LogLevel.
+// This should be called after Validate() to ensure the log level is normalized.
+func (c *Config) SlogLevel() slog.Level {
+	switch c.LogLevel {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // configFilePath returns the full path to the config file.

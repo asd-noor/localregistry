@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -39,6 +40,13 @@ Configuration is loaded from (in order of precedence):
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
+		slog.Debug("configuration loaded",
+			"host", cfg.Registry.Host,
+			"port", cfg.Registry.Port,
+			"insecure", cfg.Registry.Insecure,
+			"timeout", cfg.Registry.Timeout,
+		)
+
 		// Apply config values as defaults for flags not explicitly set
 		if !cmd.Flags().Changed("host") {
 			registryHost = cfg.Registry.Host
@@ -58,6 +66,14 @@ Configuration is loaded from (in order of precedence):
 		if !cmd.Flags().Changed("timeout") {
 			timeout = cfg.Registry.Timeout
 		}
+
+		slog.Debug("effective registry settings",
+			"host", registryHost,
+			"port", registryPort,
+			"has_credentials", username != "",
+			"insecure", insecure,
+			"timeout", timeout,
+		)
 
 		return nil
 	},

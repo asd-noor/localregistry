@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -61,6 +62,7 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("get blob request failed", "repository", name, "digest", digest, "error", err)
 		return nil, nil, fmt.Errorf("get blob request failed: %w", err)
 	}
 
@@ -70,6 +72,7 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 		if location == "" {
 			return nil, nil, fmt.Errorf("redirect response missing Location header")
 		}
+		slog.Debug("following blob redirect", "location", location)
 		redirectReq, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create redirect request: %w", err)
@@ -80,6 +83,8 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 		}
 	}
 
+	slog.Debug("get blob response", "repository", name, "digest", digest, "status", resp.StatusCode)
+
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		return nil, nil, parseAPIError(resp)
@@ -89,6 +94,8 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 		Digest:        resp.Header.Get(contentDigestHeader),
 		ContentLength: resp.ContentLength,
 	}
+
+	slog.Debug("blob stream opened", "repository", name, "digest", digest, "size", info.ContentLength)
 
 	return resp.Body, info, nil
 }
@@ -104,13 +111,17 @@ func (c *Client) DeleteBlob(ctx context.Context, name, digest string) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("delete blob request failed", "repository", name, "digest", digest, "error", err)
 		return fmt.Errorf("delete blob request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	slog.Debug("delete blob response", "repository", name, "digest", digest, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusAccepted {
 		return parseAPIError(resp)
 	}
 
+	slog.Info("blob deleted", "repository", name, "digest", digest)
 	return nil
 }

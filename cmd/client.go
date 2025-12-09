@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -27,7 +28,17 @@ func newClient() (*api.Client, error) {
 		Insecure: insecure,
 		Timeout:  timeout,
 	}
-	return api.NewClient(cfg)
+
+	slog.Debug("creating api client", "address", address, "insecure", insecure, "timeout", timeout)
+
+	client, err := api.NewClient(cfg)
+	if err != nil {
+		slog.Error("failed to create api client", "error", err)
+		return nil, err
+	}
+
+	slog.Debug("api client created successfully")
+	return client, nil
 }
 
 func newContext() context.Context {
@@ -36,7 +47,7 @@ func newContext() context.Context {
 
 func exitOnError(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		slog.Error("command failed", "error", err)
 		os.Exit(1)
 	}
 }
