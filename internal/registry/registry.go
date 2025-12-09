@@ -16,13 +16,14 @@ import (
 const (
 	DefaultRegistryImage = "registry:3"
 	DefaultRegistryPort  = "5000"
-	DefaultContainerName = "registry"
+	DefaultContainerName = "local-registry"
 )
 
 // RegistryConfig holds configuration for a local Docker registry.
 type RegistryConfig struct {
 	Image         string
-	Name          string
+	HostName      string
+	ContainerName string
 	HostPort      string
 	ContainerPort string
 	DataVolume    string
@@ -56,8 +57,8 @@ func NewRegistry(docker DockerClient, config RegistryConfig) *Registry {
 	if config.Image == "" {
 		config.Image = DefaultRegistryImage
 	}
-	if config.Name == "" {
-		config.Name = DefaultContainerName
+	if config.ContainerName == "" {
+		config.ContainerName = DefaultContainerName
 	}
 	if config.HostPort == "" {
 		config.HostPort = DefaultRegistryPort
@@ -82,7 +83,7 @@ func (r *Registry) Start(ctx context.Context) error {
 
 	containerConfig, hostConfig := r.buildContainerConfig()
 
-	id, err := r.docker.CreateContainer(ctx, containerConfig, hostConfig, r.config.Name)
+	id, err := r.docker.CreateContainer(ctx, containerConfig, hostConfig, r.config.ContainerName)
 	if err != nil {
 		return fmt.Errorf("failed to create registry container: %w", err)
 	}
@@ -144,7 +145,7 @@ func (r *Registry) ContainerID() string {
 
 // Address returns the registry address (host:port).
 func (r *Registry) Address() string {
-	return fmt.Sprintf("localhost:%s", r.config.HostPort)
+	return fmt.Sprintf("%s:%s", r.config.HostName, r.config.HostPort)
 }
 
 func (r *Registry) findContainer(ctx context.Context) error {
@@ -154,13 +155,13 @@ func (r *Registry) findContainer(ctx context.Context) error {
 	}
 	for _, c := range containers {
 		for _, name := range c.Names {
-			if strings.TrimPrefix(name, "/") == r.config.Name {
+			if strings.TrimPrefix(name, "/") == r.config.ContainerName {
 				r.containerID = c.ID
 				return nil
 			}
 		}
 	}
-	return fmt.Errorf("registry container %q not found", r.config.Name)
+	return fmt.Errorf("registry container %q not found", r.config.ContainerName)
 }
 
 func (r *Registry) buildContainerConfig() (*container.Config, *container.HostConfig) {
