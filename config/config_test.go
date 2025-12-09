@@ -14,8 +14,11 @@ func TestLoad(t *testing.T) {
 	}
 
 	// Verify embedded defaults
-	if cfg.Registry.URL != "http://localhost:5000" {
-		t.Errorf("expected default registry.url 'http://localhost:5000', got %q", cfg.Registry.URL)
+	if cfg.Registry.Host != "localhost" {
+		t.Errorf("expected default registry.host 'localhost', got %q", cfg.Registry.Host)
+	}
+	if cfg.Registry.Port != 5000 {
+		t.Errorf("expected default registry.port 5000, got %d", cfg.Registry.Port)
 	}
 	if cfg.Registry.Username != "" {
 		t.Errorf("expected default registry.username '', got %q", cfg.Registry.Username)
@@ -44,7 +47,8 @@ func TestValidate(t *testing.T) {
 			name: "valid config",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:      "http://localhost:5000",
+					Host:     "localhost",
+					Port:     5000,
 					Timeout:  30 * time.Second,
 					Insecure: false,
 				},
@@ -55,7 +59,8 @@ func TestValidate(t *testing.T) {
 			name: "valid config with auth",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:      "https://registry.example.com",
+					Host:     "registry.example.com",
+					Port:     5001,
 					Username: "admin",
 					Password: "secret",
 					Timeout:  60 * time.Second,
@@ -64,10 +69,23 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
-			name: "empty registry URL",
+			name: "empty registry host",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:     "",
+					Host:    "",
+					Port:    5000,
+					Timeout: 30 * time.Second,
+				},
+				LogLevel: "info",
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero registry port",
+			cfg: Config{
+				Registry: RegistryConfig{
+					Host:    "localhost",
+					Port:    0,
 					Timeout: 30 * time.Second,
 				},
 				LogLevel: "info",
@@ -78,7 +96,8 @@ func TestValidate(t *testing.T) {
 			name: "negative timeout",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:     "http://localhost:5000",
+					Host:    "localhost",
+					Port:    5000,
 					Timeout: -1 * time.Second,
 				},
 				LogLevel: "info",
@@ -89,7 +108,8 @@ func TestValidate(t *testing.T) {
 			name: "invalid log level",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:     "http://localhost:5000",
+					Host:    "localhost",
+					Port:    5000,
 					Timeout: 30 * time.Second,
 				},
 				LogLevel: "trace",
@@ -100,7 +120,8 @@ func TestValidate(t *testing.T) {
 			name: "case insensitive log level",
 			cfg: Config{
 				Registry: RegistryConfig{
-					URL:     "http://localhost:5000",
+					Host:    "localhost",
+					Port:    5000,
 					Timeout: 30 * time.Second,
 				},
 				LogLevel: "DEBUG",
@@ -146,13 +167,14 @@ func TestConfigFilePath(t *testing.T) {
 }
 
 func TestLoadWithEnvOverride(t *testing.T) {
-	// Set environment variables using nested key format (LOCALREGISTRY_REGISTRY_*)
-	t.Setenv("LOCALREGISTRY_REGISTRY_URL", "https://registry.example.com:5001")
-	t.Setenv("LOCALREGISTRY_REGISTRY_USERNAME", "testuser")
-	t.Setenv("LOCALREGISTRY_REGISTRY_PASSWORD", "testpass")
-	t.Setenv("LOCALREGISTRY_REGISTRY_INSECURE", "true")
-	t.Setenv("LOCALREGISTRY_REGISTRY_TIMEOUT", "60s")
-	t.Setenv("LOCALREGISTRY_LOG_LEVEL", "DEBUG")
+	// Set environment variables using nested key format (LR_REGISTRY_*)
+	t.Setenv("LR_REGISTRY_HOST", "registry.example.com")
+	t.Setenv("LR_REGISTRY_PORT", "5001")
+	t.Setenv("LR_REGISTRY_USERNAME", "testuser")
+	t.Setenv("LR_REGISTRY_PASSWORD", "testpass")
+	t.Setenv("LR_REGISTRY_INSECURE", "true")
+	t.Setenv("LR_REGISTRY_TIMEOUT", "60s")
+	t.Setenv("LR_LOG_LEVEL", "DEBUG")
 
 	cfg, err := Load()
 	if err != nil {
@@ -160,8 +182,11 @@ func TestLoadWithEnvOverride(t *testing.T) {
 	}
 
 	// Verify environment overrides
-	if cfg.Registry.URL != "https://registry.example.com:5001" {
-		t.Errorf("expected registry.url 'https://registry.example.com:5001' from env, got %q", cfg.Registry.URL)
+	if cfg.Registry.Host != "registry.example.com" {
+		t.Errorf("expected registry.host 'registry.example.com' from env, got %q", cfg.Registry.Host)
+	}
+	if cfg.Registry.Port != 5001 {
+		t.Errorf("expected registry.port 5001 from env, got %d", cfg.Registry.Port)
 	}
 	if cfg.Registry.Username != "testuser" {
 		t.Errorf("expected registry.username 'testuser' from env, got %q", cfg.Registry.Username)

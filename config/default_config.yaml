@@ -3,7 +3,9 @@
 
 # Registry connection settings
 registry:
-  url: http://localhost:5000
+  host: localhost
+  port: 5000
+  datadir: "~/.local/data/localregistry"
   username: ""
   password: ""
   insecure: false

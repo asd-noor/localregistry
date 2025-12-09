@@ -10,16 +10,18 @@ import (
 )
 
 var (
-	registryURL string
-	username    string
-	password    string
-	insecure    bool
-	timeout     time.Duration
+	registryHost string
+	registryPort int
+	username     string
+	password     string
+	insecure     bool
+	timeout      time.Duration
 )
 
 func newClient() (*api.Client, error) {
+	address := fmt.Sprintf("%s:%d", registryHost, registryPort)
 	cfg := api.ClientConfig{
-		Address:  registryURL,
+		Address:  address,
 		Username: username,
 		Password: password,
 		Insecure: insecure,

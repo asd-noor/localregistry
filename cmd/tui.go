@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"localregistry/internal/api"
 	"localregistry/internal/tui"
 
@@ -12,8 +14,9 @@ var tuiCmd = &cobra.Command{
 	Short: "Launch interactive TUI",
 	Long:  "Start the interactive terminal user interface for browsing and managing the registry.",
 	Run: func(cmd *cobra.Command, args []string) {
+		address := fmt.Sprintf("%s:%d", registryHost, registryPort)
 		cfg := api.ClientConfig{
-			Address:  registryURL,
+			Address:  address,
 			Username: username,
 			Password: password,
 			Insecure: insecure,

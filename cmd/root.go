@@ -28,7 +28,7 @@ as well as delete operations for registry management.
 
 Configuration is loaded from (in order of precedence):
   1. Command-line flags
-  2. Environment variables (LOCALREGISTRY_REGISTRY_URL, etc.)
+  2. Environment variables (LR_REGISTRY_HOST, LR_REGISTRY_PORT, etc.)
   3. Config file (~/.config/localregistry/config.yaml)
   4. Embedded defaults`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -40,8 +40,11 @@ Configuration is loaded from (in order of precedence):
 		}
 
 		// Apply config values as defaults for flags not explicitly set
-		if !cmd.Flags().Changed("url") {
-			registryURL = cfg.Registry.URL
+		if !cmd.Flags().Changed("host") {
+			registryHost = cfg.Registry.Host
+		}
+		if !cmd.Flags().Changed("port") {
+			registryPort = cfg.Registry.Port
 		}
 		if !cmd.Flags().Changed("user") {
 			username = cfg.Registry.Username
@@ -79,19 +82,21 @@ var configCmd = &cobra.Command{
 		}
 		fmt.Printf("Config file: %s\n", configPath)
 		fmt.Printf("\nCurrent settings:\n")
-		fmt.Printf("  Registry URL: %s\n", registryURL)
-		fmt.Printf("  Username:     %s\n", username)
-		fmt.Printf("  Insecure:     %v\n", insecure)
-		fmt.Printf("  Timeout:      %s\n", timeout)
+		fmt.Printf("  Registry Host: %s\n", registryHost)
+		fmt.Printf("  Registry Port: %d\n", registryPort)
+		fmt.Printf("  Username:      %s\n", username)
+		fmt.Printf("  Insecure:      %v\n", insecure)
+		fmt.Printf("  Timeout:       %s\n", timeout)
 		if cfg != nil {
-			fmt.Printf("  Log Level:    %s\n", cfg.LogLevel)
+			fmt.Printf("  Log Level:     %s\n", cfg.LogLevel)
 		}
 	},
 }
 
 func init() {
 	// Define flags with placeholder defaults; actual defaults come from config in PersistentPreRunE
-	rootCmd.PersistentFlags().StringVarP(&registryURL, "url", "u", "http://localhost:5000", "Registry URL")
+	rootCmd.PersistentFlags().StringVarP(&registryHost, "host", "H", "localhost", "Registry host")
+	rootCmd.PersistentFlags().IntVarP(&registryPort, "port", "p", 5000, "Registry port")
 	rootCmd.PersistentFlags().StringVar(&username, "user", "", "Username for basic auth")
 	rootCmd.PersistentFlags().StringVar(&password, "pass", "", "Password for basic auth")
 	rootCmd.PersistentFlags().BoolVarP(&insecure, "insecure", "k", false, "Skip TLS certificate verification")

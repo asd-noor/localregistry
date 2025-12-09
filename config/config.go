@@ -3,13 +3,13 @@
 // (e.g., ~/.config/localregistry/config.yaml on Linux) using Viper,
 // with support for environment variables and sensible defaults.
 //
-// Recognized environment variables (prefix LOCALREGISTRY_):
-//   - LOCALREGISTRY_REGISTRY_URL (string)
-//   - LOCALREGISTRY_REGISTRY_USERNAME (string)
-//   - LOCALREGISTRY_REGISTRY_PASSWORD (string)
-//   - LOCALREGISTRY_REGISTRY_INSECURE (bool)
-//   - LOCALREGISTRY_REGISTRY_TIMEOUT (duration, e.g. "30s")
-//   - LOCALREGISTRY_LOG_LEVEL (string, one of: debug, info, warn, error)
+// Recognized environment variables (prefix LR_):
+//   - LR_REGISTRY_URL (string)
+//   - LR_REGISTRY_USERNAME (string)
+//   - LR_REGISTRY_PASSWORD (string)
+//   - LR_REGISTRY_INSECURE (bool)
+//   - LR_REGISTRY_TIMEOUT (duration, e.g. "30s")
+//   - LR_LOG_LEVEL (string, one of: debug, info, warn, error)
 package config
 
 import (
@@ -30,7 +30,9 @@ var defaultConfigYAML []byte
 
 // RegistryConfig holds registry connection settings.
 type RegistryConfig struct {
-	URL      string        `mapstructure:"url"`
+	// URL      string        `mapstructure:"url"`
+	Host     string        `mapstructure:"host"`
+	Port     int           `mapstructure:"port"`
 	Username string        `mapstructure:"username"`
 	Password string        `mapstructure:"password"`
 	Insecure bool          `mapstructure:"insecure"`
@@ -47,7 +49,7 @@ type Config struct {
 // It loads configuration from the OS-appropriate config directory (e.g.,
 // $HOME/.config/localregistry/config.yaml on Linux), with fallback to
 // embedded defaults if the file doesn't exist.
-// Environment variables prefixed with LOCALREGISTRY_ override config file values.
+// Environment variables prefixed with LR_ override config file values.
 func Load() (*Config, error) {
 	v := viper.New()
 
@@ -78,7 +80,7 @@ func Load() (*Config, error) {
 	}
 
 	// Enable environment variable binding (highest priority)
-	v.SetEnvPrefix("LOCALREGISTRY")
+	v.SetEnvPrefix("LR")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
@@ -98,9 +100,14 @@ func Load() (*Config, error) {
 
 // Validate ensures the configuration values are valid.
 func (c *Config) Validate() error {
-	if c.Registry.URL == "" {
-		return fmt.Errorf("registry.url must not be empty")
+	if c.Registry.Host == "" {
+		return fmt.Errorf("registry.host must not be empty")
 	}
+
+	if c.Registry.Port == 0 {
+		return fmt.Errorf("registry.port must be a non-zero integer")
+	}
+
 	if c.Registry.Timeout < 0 {
 		return fmt.Errorf("registry.timeout must be non-negative")
 	}
