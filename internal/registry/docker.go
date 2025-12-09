@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	imageTypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // DockerClient abstracts Docker operations for testability and extensibility.
@@ -23,6 +24,7 @@ type DockerClient interface {
 	InspectContainer(ctx context.Context, containerID string) (*container.InspectResponse, error)
 	ListContainers(ctx context.Context, all bool) ([]container.Summary, error)
 	StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
+	CopyLogs(ctx context.Context, containerID string, stdout, stderr io.Writer, opts LogsOptions) error
 }
 
 // LogsOptions configures container log streaming.
@@ -141,7 +143,7 @@ func (d *dockerClient) ListContainers(ctx context.Context, all bool) ([]containe
 // StreamLogs returns an io.ReadCloser for streaming container logs.
 // The caller is responsible for closing the returned reader.
 // Note: Docker multiplexes stdout/stderr with an 8-byte header per frame when TTY is disabled.
-// Use stdcopy.StdCopy to demultiplex if needed.
+// Use CopyLogs for automatic demultiplexing, or stdcopy.StdCopy manually.
 func (d *dockerClient) StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
 	slog.Debug("streaming container logs",
 		"container_id", containerID,
@@ -172,4 +174,37 @@ func (d *dockerClient) StreamLogs(ctx context.Context, containerID string, opts 
 	}
 
 	return reader, nil
+}
+
+// CopyLogs streams container logs to the provided writers with automatic demultiplexing.
+// For non-TTY containers, Docker multiplexes stdout/stderr; this method handles that transparently.
+// If the container uses a TTY, output goes to stdout only (stderr is ignored in TTY mode).
+func (d *dockerClient) CopyLogs(ctx context.Context, containerID string, stdout, stderr io.Writer, opts LogsOptions) error {
+	reader, err := d.StreamLogs(ctx, containerID, opts)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	// Check if container uses TTY
+	inspect, err := d.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		slog.Error("container inspect failed during log copy", "container_id", containerID, "error", err)
+		return fmt.Errorf("container inspect failed: %w", err)
+	}
+
+	if inspect.Config.Tty {
+		// TTY mode: no multiplexing, just copy directly
+		_, err = io.Copy(stdout, reader)
+	} else {
+		// Non-TTY: demultiplex stdout/stderr
+		_, err = stdcopy.StdCopy(stdout, stderr, reader)
+	}
+
+	if err != nil {
+		slog.Error("log copy failed", "container_id", containerID, "error", err)
+		return fmt.Errorf("log copy failed: %w", err)
+	}
+
+	return nil
 }
