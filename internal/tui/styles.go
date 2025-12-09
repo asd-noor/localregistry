@@ -91,4 +91,24 @@ var (
 	digestStyle = lipgloss.NewStyle().
 			Foreground(subtleColor).
 			Italic(true)
+
+	// Log view styles
+	logStdoutStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+	logStderrStyle = lipgloss.NewStyle().
+			Foreground(warningColor)
+
+	logPrefixStdoutStyle = lipgloss.NewStyle().
+				Foreground(successColor).
+				Bold(true)
+
+	logPrefixStderrStyle = lipgloss.NewStyle().
+				Foreground(errorColor).
+				Bold(true)
+
+	logViewportStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(subtleColor).
+				Padding(0, 1)
 )

@@ -1,16 +1,21 @@
 package tui
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"log/slog"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"localregistry/internal/api"
+	"localregistry/internal/registry"
 )
 
 // ViewState represents the current view in the TUI.
@@ -21,6 +26,7 @@ const (
 	ViewTags
 	ViewManifest
 	ViewConfirmDelete
+	ViewLogs
 )
 
 // Model is the main TUI model.
@@ -44,6 +50,16 @@ type Model struct {
 	currentRepo string
 
 	manifest *api.Manifest
+
+	// Log viewing
+	logsDocker    registry.DockerClient
+	logsContainer string
+	logsViewport  viewport.Model
+	logsContent   strings.Builder
+	logsFollowing bool
+	logsCh        chan string
+	logsCtx       context.Context
+	logsCancelFn  context.CancelFunc
 }
 
 type deleteTarget struct {
@@ -82,6 +98,8 @@ type (
 	manifestLoadedMsg *api.Manifest
 	deleteSuccessMsg  string
 	errMsg            error
+	logLineMsg        string
+	logsStoppedMsg    struct{}
 )
 
 // KeyMap defines the keybindings for the TUI.
@@ -96,6 +114,7 @@ type KeyMap struct {
 	Help    key.Binding
 	Confirm key.Binding
 	Cancel  key.Binding
+	Logs    key.Binding
 }
 
 var keys = KeyMap{
@@ -138,6 +157,10 @@ var keys = KeyMap{
 	Cancel: key.NewBinding(
 		key.WithKeys("n", "N", "esc"),
 		key.WithHelp("n/esc", "no"),
+	),
+	Logs: key.NewBinding(
+		key.WithKeys("l"),
+		key.WithHelp("l", "logs"),
 	),
 }
 
@@ -199,6 +222,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		h := msg.Height - 4
 		m.repoList.SetSize(msg.Width, h)
 		m.tagList.SetSize(msg.Width, h)
+		// Update viewport size for logs view
+		if m.state == ViewLogs {
+			m.logsViewport.Width = msg.Width - 4
+			m.logsViewport.Height = h - 2
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -247,6 +275,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg
 		m.statusMsg = errorStyle.Render("Error: " + msg.Error())
 		return m, nil
+
+	case logLineMsg:
+		m.logsContent.WriteString(string(msg) + "\n")
+		m.logsViewport.SetContent(m.logsContent.String())
+		if m.logsFollowing {
+			m.logsViewport.GotoBottom()
+		}
+		// Continue listening for more log lines
+		return m, m.waitForLogLine()
+
+	case logsStoppedMsg:
+		m.logsFollowing = false
+		m.statusMsg = "Log streaming stopped"
+		return m, nil
 	}
 
 	switch m.state {
@@ -258,12 +300,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.tagList, cmd = m.tagList.Update(msg)
 		cmds = append(cmds, cmd)
+	case ViewLogs:
+		var cmd tea.Cmd
+		m.logsViewport, cmd = m.logsViewport.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle logs view separately
+	if m.state == ViewLogs {
+		return m.handleLogsKeyMsg(msg)
+	}
+
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
@@ -323,6 +374,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmYes = false
 				return m, nil
 			}
+		}
+
+	case key.Matches(msg, keys.Logs):
+		if m.logsDocker != nil && m.logsContainer != "" {
+			return m.startLogsView()
 		}
 	}
 
@@ -385,6 +441,8 @@ func (m Model) View() string {
 		content = m.renderManifest()
 	case ViewConfirmDelete:
 		content = m.tagList.View() + "\n" + m.renderConfirmDialog()
+	case ViewLogs:
+		content = m.renderLogs()
 	}
 
 	if m.loading {
@@ -442,9 +500,19 @@ func (m Model) renderStatusBar() string {
 		status = m.currentRepo + " > Manifest"
 	case ViewConfirmDelete:
 		status = "Confirm Delete"
+	case ViewLogs:
+		status = "Container Logs"
+		if m.logsFollowing {
+			status += " (following)"
+		}
 	}
 
-	help := helpStyle.Render("↑/↓: navigate • enter: select • d: delete • r: refresh • esc: back • q: quit")
+	var help string
+	if m.state == ViewLogs {
+		help = helpStyle.Render("↑/↓/pgup/pgdn: scroll • f: toggle follow • esc: back • q: quit")
+	} else {
+		help = helpStyle.Render("↑/↓: navigate • enter: select • d: delete • l: logs • r: refresh • esc: back • q: quit")
+	}
 	bar := statusBarStyle.Width(m.width).Render(status)
 
 	return bar + "\n" + help
@@ -510,4 +578,324 @@ func Run(client *api.Client) error {
 	}
 	slog.Debug("tui application exited")
 	return err
+}
+
+// RunWithLogs starts the TUI application with log viewing capability.
+func RunWithLogs(client *api.Client, docker registry.DockerClient, containerID string) error {
+	slog.Debug("starting tui application with logs", "container_id", containerID)
+	m := New(client)
+	m.logsDocker = docker
+	m.logsContainer = containerID
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	if err != nil {
+		slog.Error("tui application error", "error", err)
+	}
+	slog.Debug("tui application exited")
+	return err
+}
+
+// SetLogsSource configures the Docker client and container for log viewing.
+func (m *Model) SetLogsSource(docker registry.DockerClient, containerID string) {
+	m.logsDocker = docker
+	m.logsContainer = containerID
+}
+
+// handleLogsKeyMsg handles key events in the logs view.
+func (m Model) handleLogsKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.Quit):
+		m.stopLogs()
+		return m, tea.Quit
+
+	case key.Matches(msg, keys.Back):
+		m.stopLogs()
+		m.state = ViewRepositories
+		m.logsContent.Reset()
+		return m, nil
+
+	case msg.String() == "f":
+		m.logsFollowing = !m.logsFollowing
+		if m.logsFollowing {
+			m.logsViewport.GotoBottom()
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.logsViewport, cmd = m.logsViewport.Update(msg)
+	return m, cmd
+}
+
+// startLogsView initializes and switches to the logs view.
+func (m Model) startLogsView() (tea.Model, tea.Cmd) {
+	// Initialize viewport
+	h := m.height - 6
+	if h < 5 {
+		h = 5
+	}
+	m.logsViewport = viewport.New(m.width-4, h)
+	m.logsViewport.Style = logViewportStyle
+	m.logsContent.Reset()
+	m.logsFollowing = true
+	m.state = ViewLogs
+	m.statusMsg = "Streaming logs..."
+
+	// Create channel and context for log streaming
+	m.logsCh = make(chan string, 100)
+	m.logsCtx, m.logsCancelFn = context.WithCancel(context.Background())
+
+	// Start background log streaming
+	go m.streamLogsBackground()
+
+	return m, m.waitForLogLine()
+}
+
+// stopLogs cancels the log streaming goroutine.
+func (m *Model) stopLogs() {
+	if m.logsCancelFn != nil {
+		m.logsCancelFn()
+		m.logsCancelFn = nil
+	}
+}
+
+// renderLogs renders the logs view.
+func (m Model) renderLogs() string {
+	title := titleStyle.Render("Container Logs: " + truncateID(m.logsContainer))
+
+	var followIndicator string
+	if m.logsFollowing {
+		followIndicator = successStyle.Render(" [FOLLOWING]")
+	} else {
+		followIndicator = dimmedStyle.Render(" [PAUSED]")
+	}
+
+	header := lipgloss.JoinHorizontal(lipgloss.Left, title, followIndicator)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", m.logsViewport.View())
+}
+
+// truncateID truncates a container ID for display.
+func truncateID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// streamLogs returns a command that streams container logs.
+func (m Model) streamLogs() tea.Cmd {
+	return func() tea.Msg {
+		if m.logsDocker == nil || m.logsContainer == "" {
+			return errMsg(io.EOF)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// Store cancel function - note: this requires pointer receiver to persist
+		// We'll handle cancellation via context
+
+		reader, err := m.logsDocker.StreamLogs(ctx, m.logsContainer, registry.LogsOptions{
+			Follow: true,
+			Tail:   "100",
+		})
+		if err != nil {
+			cancel()
+			return errMsg(err)
+		}
+
+		// Start goroutine to read logs
+		go func() {
+			defer reader.Close()
+			defer cancel()
+			streamLogsToProgram(ctx, reader, m.logsContainer, m.logsDocker)
+		}()
+
+		return nil
+	}
+}
+
+// waitForLogLine returns a command that waits for the next log line from the channel.
+func (m Model) waitForLogLine() tea.Cmd {
+	return func() tea.Msg {
+		if m.logsCh == nil {
+			return logsStoppedMsg{}
+		}
+		select {
+		case line, ok := <-m.logsCh:
+			if !ok {
+				return logsStoppedMsg{}
+			}
+			return logLineMsg(line)
+		case <-m.logsCtx.Done():
+			return logsStoppedMsg{}
+		}
+	}
+}
+
+// streamLogsBackground reads logs in the background and sends them to the channel.
+func (m Model) streamLogsBackground() {
+	if m.logsDocker == nil || m.logsContainer == "" || m.logsCh == nil {
+		return
+	}
+	defer close(m.logsCh)
+
+	reader, err := m.logsDocker.StreamLogs(m.logsCtx, m.logsContainer, registry.LogsOptions{
+		Follow: true,
+		Tail:   "100",
+	})
+	if err != nil {
+		slog.Error("failed to start log streaming", "error", err)
+		return
+	}
+	defer reader.Close()
+
+	// Check if container uses TTY
+	inspect, err := m.logsDocker.InspectContainer(m.logsCtx, m.logsContainer)
+	if err != nil {
+		slog.Error("failed to inspect container for log streaming", "error", err)
+		return
+	}
+
+	if inspect.Config.Tty {
+		// TTY mode: read lines directly
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			select {
+			case <-m.logsCtx.Done():
+				return
+			case m.logsCh <- logPrefixStdoutStyle.Render("[STDOUT]: ") + scanner.Text():
+			}
+		}
+	} else {
+		// Non-TTY: demultiplex
+		m.demuxLogsToChannel(reader)
+	}
+}
+
+// demuxLogsToChannel reads Docker's multiplexed log stream and sends to channel.
+func (m Model) demuxLogsToChannel(r io.Reader) {
+	header := make([]byte, 8)
+
+	for {
+		select {
+		case <-m.logsCtx.Done():
+			return
+		default:
+		}
+
+		_, err := io.ReadFull(r, header)
+		if err != nil {
+			return
+		}
+
+		streamType := header[0]
+		size := uint32(header[4])<<24 | uint32(header[5])<<16 | uint32(header[6])<<8 | uint32(header[7])
+
+		payload := make([]byte, size)
+		_, err = io.ReadFull(r, payload)
+		if err != nil {
+			return
+		}
+
+		// Process lines with appropriate styling
+		var prefix string
+		switch streamType {
+		case 1:
+			prefix = logPrefixStdoutStyle.Render("[STDOUT]: ")
+		case 2:
+			prefix = logPrefixStderrStyle.Render("[STDERR]: ")
+		default:
+			prefix = dimmedStyle.Render("[UNKNOWN]: ")
+		}
+
+		scanner := bufio.NewScanner(strings.NewReader(string(payload)))
+		for scanner.Scan() {
+			var styledLine string
+			if streamType == 2 {
+				styledLine = prefix + logStderrStyle.Render(scanner.Text())
+			} else {
+				styledLine = prefix + logStdoutStyle.Render(scanner.Text())
+			}
+
+			select {
+			case <-m.logsCtx.Done():
+				return
+			case m.logsCh <- styledLine:
+			}
+		}
+	}
+}
+
+// streamLogsToProgram reads logs and would send them to the program.
+// Note: In a real implementation, you'd pass the *tea.Program to send messages.
+// For now, this demonstrates the pattern - actual integration requires Program.Send().
+func streamLogsToProgram(ctx context.Context, reader io.ReadCloser, containerID string, docker registry.DockerClient) {
+	// Check if container uses TTY by inspecting it
+	inspect, err := docker.InspectContainer(ctx, containerID)
+	if err != nil {
+		slog.Error("failed to inspect container for log streaming", "error", err)
+		return
+	}
+
+	if inspect.Config.Tty {
+		// TTY mode: read lines directly
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				line := scanner.Text()
+				slog.Debug("log line (tty)", "line", line)
+				// Would send: program.Send(logLineMsg("[STDOUT]: " + line + "\n"))
+			}
+		}
+	} else {
+		// Non-TTY: demultiplex
+		demuxLogsToChannel(ctx, reader)
+	}
+}
+
+// demuxLogsToChannel reads Docker's multiplexed log stream.
+func demuxLogsToChannel(ctx context.Context, r io.Reader) {
+	header := make([]byte, 8)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		_, err := io.ReadFull(r, header)
+		if err != nil {
+			return
+		}
+
+		streamType := header[0]
+		size := uint32(header[4])<<24 | uint32(header[5])<<16 | uint32(header[6])<<8 | uint32(header[7])
+
+		var prefix string
+		switch streamType {
+		case 1:
+			prefix = "[STDOUT]: "
+		case 2:
+			prefix = "[STDERR]: "
+		default:
+			prefix = "[UNKNOWN]: "
+		}
+
+		payload := make([]byte, size)
+		_, err = io.ReadFull(r, payload)
+		if err != nil {
+			return
+		}
+
+		// Process lines
+		scanner := bufio.NewScanner(strings.NewReader(string(payload)))
+		for scanner.Scan() {
+			line := prefix + scanner.Text() + "\n"
+			slog.Debug("log line (demux)", "line", line)
+			// Would send: program.Send(logLineMsg(line))
+		}
+	}
 }
