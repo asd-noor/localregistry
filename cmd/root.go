@@ -1,3 +1,4 @@
+// Package cmd implements the CLI commands for localregistry.
 package cmd
 
 import (
@@ -16,7 +17,7 @@ var (
 	Commit  = "none"
 )
 
-// cfg holds the loaded configuration
+// cfg holds the loaded configuration, set via Execute().
 var cfg *config.Config
 
 var rootCmd = &cobra.Command{
@@ -33,14 +34,7 @@ Configuration is loaded from (in order of precedence):
   3. Config file (~/.config/localregistry/config.yaml)
   4. Embedded defaults`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Load configuration before any command runs
-		var err error
-		cfg, err = config.Load()
-		if err != nil {
-			return fmt.Errorf("failed to load configuration: %w", err)
-		}
-
-		slog.Debug("configuration loaded",
+		slog.Debug("applying configuration",
 			"host", cfg.Registry.Host,
 			"port", cfg.Registry.Port,
 			"insecure", cfg.Registry.Insecure,
@@ -127,7 +121,9 @@ func GetConfig() *config.Config {
 	return cfg
 }
 
-func Execute() {
+// Execute runs the root command with the provided configuration.
+func Execute(c *config.Config) {
+	cfg = c
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
