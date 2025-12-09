@@ -155,14 +155,15 @@ func determineSourceRef(source string) string {
 	docker, err := registry.NewDockerClient()
 	if err == nil {
 		ctx := context.Background()
-		containers, _ := docker.ListContainers(ctx, false)
-		// This is a simple heuristic - in practice we'd use ImageInspect
-		_ = containers
+		exists, checkErr := docker.ImageExists(ctx, source)
+		if checkErr == nil && exists {
+			// Image found in local Docker daemon
+			fmt.Printf("Found local image: %s\n", source)
+			return registry.ImageRef(registry.TransportDockerDaemon, source)
+		}
 	}
 
-	// For simplicity, assume remote registry by default
-	// The backup script checks `docker image inspect` - we could add that
-	// For now, prefix with docker:// for remote images
+	// Not found locally - determine the remote registry reference
 	if !strings.Contains(source, "/") {
 		// Bare image name like "alpine" - assume Docker Hub library
 		return registry.ImageRef(registry.TransportDocker, "docker.io/library/"+source)

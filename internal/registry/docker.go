@@ -26,6 +26,18 @@ type DockerClient interface {
 	ListContainers(ctx context.Context, all bool) ([]container.Summary, error)
 	StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
 	Exec(ctx context.Context, containerID string, cmd []string, opts ExecOptions) (*ExecResult, error)
+	ImageExists(ctx context.Context, image string) (bool, error)
+	ImageInspect(ctx context.Context, image string) (*LocalImageInfo, error)
+}
+
+// LocalImageInfo contains information about a local Docker image.
+type LocalImageInfo struct {
+	ID           string   // Image ID (sha256:...)
+	RepoTags     []string // Repository tags (e.g., ["alpine:latest"])
+	RepoDigests  []string // Repository digests
+	Size         int64    // Image size in bytes
+	Architecture string   // Image architecture (e.g., "amd64")
+	Os           string   // Operating system (e.g., "linux")
 }
 
 // LogsOptions configures container log streaming.
@@ -278,4 +290,56 @@ func (d *dockerClient) Exec(ctx context.Context, containerID string, cmd []strin
 	)
 
 	return result, nil
+}
+
+// ImageExists checks if an image exists in the local Docker daemon.
+func (d *dockerClient) ImageExists(ctx context.Context, image string) (bool, error) {
+	slog.Debug("checking if image exists locally", "image", image)
+
+	_, _, err := d.cli.ImageInspectWithRaw(ctx, image)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			slog.Debug("image not found locally", "image", image)
+			return false, nil
+		}
+		slog.Error("image inspect failed", "image", image, "error", err)
+		return false, fmt.Errorf("image inspect failed: %w", err)
+	}
+
+	slog.Debug("image exists locally", "image", image)
+	return true, nil
+}
+
+// ImageInspect returns detailed information about a local Docker image.
+// Returns nil if the image does not exist locally.
+func (d *dockerClient) ImageInspect(ctx context.Context, image string) (*LocalImageInfo, error) {
+	slog.Debug("inspecting local image", "image", image)
+
+	inspect, _, err := d.cli.ImageInspectWithRaw(ctx, image)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			slog.Debug("image not found locally", "image", image)
+			return nil, nil
+		}
+		slog.Error("image inspect failed", "image", image, "error", err)
+		return nil, fmt.Errorf("image inspect failed: %w", err)
+	}
+
+	info := &LocalImageInfo{
+		ID:           inspect.ID,
+		RepoTags:     inspect.RepoTags,
+		RepoDigests:  inspect.RepoDigests,
+		Size:         inspect.Size,
+		Architecture: inspect.Architecture,
+		Os:           inspect.Os,
+	}
+
+	slog.Debug("local image inspected",
+		"image", image,
+		"id", info.ID,
+		"tags", info.RepoTags,
+		"size", info.Size,
+	)
+
+	return info, nil
 }
