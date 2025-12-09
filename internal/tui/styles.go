@@ -111,4 +111,82 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(subtleColor).
 				Padding(0, 1)
+
+	// Server status panel styles
+	statusPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(subtleColor).
+				Padding(0, 1).
+				MarginBottom(1)
+
+	statusRunningStyle = lipgloss.NewStyle().
+				Foreground(successColor).
+				Bold(true)
+
+	statusStoppedStyle = lipgloss.NewStyle().
+				Foreground(errorColor).
+				Bold(true)
+
+	statusUnknownStyle = lipgloss.NewStyle().
+				Foreground(warningColor)
+
+	// Image details styles
+	layerStyle = lipgloss.NewStyle().
+			Foreground(subtleColor)
+
+	sizeStyle = lipgloss.NewStyle().
+			Foreground(secondaryColor)
+
+	archStyle = lipgloss.NewStyle().
+			Foreground(primaryColor).
+			Bold(true)
+
+	// Help overlay styles
+	helpOverlayStyle = lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(primaryColor).
+				Padding(1, 2).
+				Background(lipgloss.Color("236"))
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(highlightColor).
+			Bold(true).
+			Width(12)
+
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+	helpSectionStyle = lipgloss.NewStyle().
+				Foreground(primaryColor).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(0)
+
+	// Progress/action styles
+	progressStyle = lipgloss.NewStyle().
+			Foreground(primaryColor)
+
+	actionSuccessStyle = lipgloss.NewStyle().
+				Foreground(successColor).
+				Bold(true)
+
+	actionErrorStyle = lipgloss.NewStyle().
+				Foreground(errorColor).
+				Bold(true)
+
+	// Tab styles
+	activeTabStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("255")).
+			Background(primaryColor).
+			Padding(0, 2).
+			Bold(true)
+
+	inactiveTabStyle = lipgloss.NewStyle().
+				Foreground(subtleColor).
+				Background(lipgloss.Color("236")).
+				Padding(0, 2)
+
+	tabGapStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Padding(0, 1)
 )

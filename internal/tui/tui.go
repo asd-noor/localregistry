@@ -3,6 +3,8 @@ package tui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -27,6 +29,10 @@ const (
 	ViewManifest
 	ViewConfirmDelete
 	ViewLogs
+	ViewImageDetails
+	ViewHelp
+	ViewGarbageCollect
+	ViewServerActions
 )
 
 // Model is the main TUI model.
@@ -34,20 +40,22 @@ type Model struct {
 	client *api.Client
 	ctx    context.Context
 
-	state        ViewState
-	width        int
-	height       int
-	err          error
-	loading      bool
-	statusMsg    string
-	confirmMsg   string
-	confirmYes   bool
-	deleteTarget deleteTarget
+	state         ViewState
+	previousState ViewState // For overlay views like help
+	width         int
+	height        int
+	err           error
+	loading       bool
+	statusMsg     string
+	confirmMsg    string
+	confirmYes    bool
+	deleteTarget  deleteTarget
 
 	repoList    list.Model
 	tagList     list.Model
 	spinner     spinner.Model
 	currentRepo string
+	currentTag  string
 
 	manifest *api.Manifest
 
@@ -60,12 +68,48 @@ type Model struct {
 	logsCh        chan string
 	logsCtx       context.Context
 	logsCancelFn  context.CancelFunc
+
+	// Server/Registry management
+	registry       *registry.Registry
+	serverStatus   *registry.RegistryInfo
+	serverStatusCh chan *registry.RegistryInfo
+
+	// Image details
+	imageDetails *ImageDetails
+
+	// GC state
+	gcResult     *registry.GarbageCollectResult
+	gcInProgress bool
+
+	// Server action selection
+	serverActionIdx int
 }
 
 type deleteTarget struct {
 	repo   string
 	tag    string
 	digest string
+}
+
+// ImageDetails contains detailed information about an image.
+type ImageDetails struct {
+	Repository   string
+	Tag          string
+	Digest       string
+	ContentType  string
+	Architecture string
+	OS           string
+	Created      string
+	Size         int64
+	Layers       []LayerInfo
+	Labels       map[string]string
+}
+
+// LayerInfo contains information about a single layer.
+type LayerInfo struct {
+	Digest    string
+	Size      int64
+	MediaType string
 }
 
 // Item types for the list.
@@ -93,13 +137,17 @@ func truncateDigest(d string) string {
 
 // Messages for async operations.
 type (
-	reposLoadedMsg    []string
-	tagsLoadedMsg     []tagItem
-	manifestLoadedMsg *api.Manifest
-	deleteSuccessMsg  string
-	errMsg            error
-	logLineMsg        string
-	logsStoppedMsg    struct{}
+	reposLoadedMsg      []string
+	tagsLoadedMsg       []tagItem
+	manifestLoadedMsg   *api.Manifest
+	deleteSuccessMsg    string
+	errMsg              error
+	logLineMsg          string
+	logsStoppedMsg      struct{}
+	serverStatusMsg     *registry.RegistryInfo
+	imageDetailsMsg     *ImageDetails
+	gcCompleteMsg       *registry.GarbageCollectResult
+	serverActionDoneMsg string
 )
 
 // KeyMap defines the keybindings for the TUI.
@@ -115,6 +163,10 @@ type KeyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
 	Logs    key.Binding
+	Details key.Binding
+	GC      key.Binding
+	Server  key.Binding
+	Tab     key.Binding
 }
 
 var keys = KeyMap{
@@ -161,6 +213,22 @@ var keys = KeyMap{
 	Logs: key.NewBinding(
 		key.WithKeys("l"),
 		key.WithHelp("l", "logs"),
+	),
+	Details: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "info/details"),
+	),
+	GC: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "garbage collect"),
+	),
+	Server: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "server actions"),
+	),
+	Tab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next option"),
 	),
 }
 
@@ -289,6 +357,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logsFollowing = false
 		m.statusMsg = "Log streaming stopped"
 		return m, nil
+
+	case serverStatusMsg:
+		m.serverStatus = msg
+		return m, nil
+
+	case imageDetailsMsg:
+		m.loading = false
+		m.imageDetails = msg
+		m.state = ViewImageDetails
+		m.statusMsg = ""
+		return m, nil
+
+	case gcCompleteMsg:
+		m.loading = false
+		m.gcInProgress = false
+		m.gcResult = msg
+		if msg.ExitCode == 0 {
+			m.statusMsg = successStyle.Render("Garbage collection completed")
+		} else {
+			m.statusMsg = errorStyle.Render("Garbage collection failed")
+		}
+		m.state = ViewGarbageCollect
+		return m, nil
+
+	case serverActionDoneMsg:
+		m.loading = false
+		m.statusMsg = successStyle.Render(string(msg))
+		return m, nil
 	}
 
 	switch m.state {
@@ -310,9 +406,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Handle logs view separately
-	if m.state == ViewLogs {
+	// Handle special views with their own key handlers
+	switch m.state {
+	case ViewLogs:
 		return m.handleLogsKeyMsg(msg)
+	case ViewHelp:
+		return m.handleHelpKeyMsg(msg)
+	case ViewServerActions:
+		return m.handleServerActionsKeyMsg(msg)
 	}
 
 	switch {
@@ -338,6 +439,20 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ViewManifest:
 			m.state = ViewTags
 			m.manifest = nil
+			return m, nil
+		case ViewImageDetails:
+			m.state = ViewTags
+			m.imageDetails = nil
+			return m, nil
+		case ViewHelp:
+			m.state = m.previousState
+			return m, nil
+		case ViewGarbageCollect:
+			m.state = ViewRepositories
+			m.gcResult = nil
+			return m, nil
+		case ViewServerActions:
+			m.state = m.previousState
 			return m, nil
 		}
 
@@ -379,6 +494,41 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Logs):
 		if m.logsDocker != nil && m.logsContainer != "" {
 			return m.startLogsView()
+		}
+
+	case key.Matches(msg, keys.Help):
+		m.previousState = m.state
+		m.state = ViewHelp
+		return m, nil
+
+	case key.Matches(msg, keys.Details):
+		// Show image details when in tags view
+		if m.state == ViewTags {
+			if item := m.tagList.SelectedItem(); item != nil {
+				tag := item.(tagItem)
+				m.currentTag = tag.name
+				m.loading = true
+				m.statusMsg = "Loading image details..."
+				return m, tea.Batch(m.spinner.Tick, m.loadImageDetails(m.currentRepo, tag.name))
+			}
+		}
+
+	case key.Matches(msg, keys.GC):
+		// Trigger garbage collection
+		if m.registry != nil && !m.gcInProgress {
+			m.gcInProgress = true
+			m.loading = true
+			m.statusMsg = "Running garbage collection..."
+			return m, tea.Batch(m.spinner.Tick, m.runGarbageCollect())
+		}
+
+	case key.Matches(msg, keys.Server):
+		// Show server actions
+		if m.registry != nil {
+			m.previousState = m.state
+			m.state = ViewServerActions
+			m.serverActionIdx = 0
+			return m, nil
 		}
 	}
 
@@ -432,6 +582,9 @@ func (m Model) View() string {
 
 	var content string
 
+	// Render server status panel at top if available
+	serverPanel := m.renderServerStatus()
+
 	switch m.state {
 	case ViewRepositories:
 		content = m.repoList.View()
@@ -443,6 +596,34 @@ func (m Model) View() string {
 		content = m.tagList.View() + "\n" + m.renderConfirmDialog()
 	case ViewLogs:
 		content = m.renderLogs()
+	case ViewImageDetails:
+		content = m.renderImageDetails()
+	case ViewHelp:
+		// Render help as overlay on previous view
+		var baseContent string
+		switch m.previousState {
+		case ViewRepositories:
+			baseContent = m.repoList.View()
+		case ViewTags:
+			baseContent = m.tagList.View()
+		default:
+			baseContent = ""
+		}
+		content = baseContent + "\n" + m.renderHelp()
+	case ViewGarbageCollect:
+		content = m.renderGarbageCollect()
+	case ViewServerActions:
+		// Render server actions as overlay
+		var baseContent string
+		switch m.previousState {
+		case ViewRepositories:
+			baseContent = m.repoList.View()
+		case ViewTags:
+			baseContent = m.tagList.View()
+		default:
+			baseContent = ""
+		}
+		content = baseContent + "\n" + m.renderServerActions()
 	}
 
 	if m.loading {
@@ -450,6 +631,11 @@ func (m Model) View() string {
 	}
 
 	statusBar := m.renderStatusBar()
+
+	// Combine all parts
+	if serverPanel != "" {
+		return serverPanel + "\n" + content + "\n" + statusBar
+	}
 	return content + "\n" + statusBar
 }
 
@@ -505,13 +691,28 @@ func (m Model) renderStatusBar() string {
 		if m.logsFollowing {
 			status += " (following)"
 		}
+	case ViewImageDetails:
+		status = m.currentRepo + ":" + m.currentTag + " > Details"
+	case ViewHelp:
+		status = "Help"
+	case ViewGarbageCollect:
+		status = "Garbage Collection"
+	case ViewServerActions:
+		status = "Server Actions"
 	}
 
 	var help string
-	if m.state == ViewLogs {
+	switch m.state {
+	case ViewLogs:
 		help = helpStyle.Render("↑/↓/pgup/pgdn: scroll • f: toggle follow • esc: back • q: quit")
-	} else {
-		help = helpStyle.Render("↑/↓: navigate • enter: select • d: delete • l: logs • r: refresh • esc: back • q: quit")
+	case ViewHelp:
+		help = helpStyle.Render("Press ? or Esc to close help")
+	case ViewServerActions:
+		help = helpStyle.Render("↑/↓: select • enter: execute • esc: cancel")
+	case ViewImageDetails, ViewGarbageCollect:
+		help = helpStyle.Render("esc: back • q: quit")
+	default:
+		help = helpStyle.Render("?: help • i: details • s: server • g: gc • d: delete • r: refresh • q: quit")
 	}
 	bar := statusBarStyle.Width(m.width).Render(status)
 
@@ -586,6 +787,24 @@ func RunWithLogs(client *api.Client, docker registry.DockerClient, containerID s
 	m := New(client)
 	m.logsDocker = docker
 	m.logsContainer = containerID
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	if err != nil {
+		slog.Error("tui application error", "error", err)
+	}
+	slog.Debug("tui application exited")
+	return err
+}
+
+// RunWithRegistry starts the TUI application with full registry management capabilities.
+func RunWithRegistry(client *api.Client, reg *registry.Registry, docker registry.DockerClient, containerID string) error {
+	slog.Debug("starting tui application with registry management", "container_id", containerID)
+	m := New(client)
+	m.registry = reg
+	if docker != nil {
+		m.logsDocker = docker
+		m.logsContainer = containerID
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	if err != nil {
@@ -898,4 +1117,363 @@ func demuxLogsToChannel(ctx context.Context, r io.Reader) {
 			// Would send: program.Send(logLineMsg(line))
 		}
 	}
+}
+
+// loadImageDetails loads detailed information about an image.
+func (m Model) loadImageDetails(repo, tag string) tea.Cmd {
+	return func() tea.Msg {
+		manifest, err := m.client.GetManifest(m.ctx, repo, tag)
+		if err != nil {
+			return errMsg(err)
+		}
+
+		details := &ImageDetails{
+			Repository:  repo,
+			Tag:         tag,
+			Digest:      manifest.Digest,
+			ContentType: manifest.ContentType,
+		}
+
+		// Parse manifest to extract layer info
+		details.Layers = parseManifestLayers(manifest.Body)
+
+		return imageDetailsMsg(details)
+	}
+}
+
+// parseManifestLayers extracts layer information from manifest JSON.
+func parseManifestLayers(body []byte) []LayerInfo {
+	var layers []LayerInfo
+
+	// Simple JSON parsing to extract layers
+	type manifestJSON struct {
+		Layers []struct {
+			MediaType string `json:"mediaType"`
+			Size      int64  `json:"size"`
+			Digest    string `json:"digest"`
+		} `json:"layers"`
+		Config struct {
+			MediaType string `json:"mediaType"`
+			Size      int64  `json:"size"`
+			Digest    string `json:"digest"`
+		} `json:"config"`
+	}
+
+	var mj manifestJSON
+	if err := json.Unmarshal(body, &mj); err != nil {
+		return layers
+	}
+
+	for _, l := range mj.Layers {
+		layers = append(layers, LayerInfo{
+			Digest:    l.Digest,
+			Size:      l.Size,
+			MediaType: l.MediaType,
+		})
+	}
+
+	return layers
+}
+
+// runGarbageCollect triggers garbage collection on the registry.
+func (m Model) runGarbageCollect() tea.Cmd {
+	return func() tea.Msg {
+		if m.registry == nil {
+			return errMsg(fmt.Errorf("registry not configured"))
+		}
+
+		result, err := m.registry.GarbageCollect(m.ctx, true)
+		if err != nil {
+			return errMsg(err)
+		}
+
+		return gcCompleteMsg(result)
+	}
+}
+
+// loadServerStatus fetches the current registry container status.
+func (m Model) loadServerStatus() tea.Cmd {
+	return func() tea.Msg {
+		if m.registry == nil {
+			return nil
+		}
+
+		info, err := m.registry.Info(m.ctx)
+		if err != nil {
+			slog.Debug("failed to get server status", "error", err)
+			return nil
+		}
+
+		return serverStatusMsg(info)
+	}
+}
+
+// serverAction performs a server action (start, stop, restart).
+func (m Model) serverAction(action string) tea.Cmd {
+	return func() tea.Msg {
+		if m.registry == nil {
+			return errMsg(fmt.Errorf("registry not configured"))
+		}
+
+		var err error
+		switch action {
+		case "start":
+			err = m.registry.Start(m.ctx)
+		case "stop":
+			err = m.registry.Stop(m.ctx)
+		case "restart":
+			err = m.registry.Restart(m.ctx)
+		default:
+			return errMsg(fmt.Errorf("unknown action: %s", action))
+		}
+
+		if err != nil {
+			return errMsg(err)
+		}
+
+		return serverActionDoneMsg(fmt.Sprintf("Server %sed successfully", action))
+	}
+}
+
+// handleServerActionsKeyMsg handles key events in the server actions view.
+func (m Model) handleServerActionsKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	actions := []string{"start", "stop", "restart"}
+
+	switch {
+	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Cancel):
+		m.state = m.previousState
+		return m, nil
+
+	case key.Matches(msg, keys.Up), msg.String() == "k":
+		if m.serverActionIdx > 0 {
+			m.serverActionIdx--
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Down), msg.String() == "j":
+		if m.serverActionIdx < len(actions)-1 {
+			m.serverActionIdx++
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Enter):
+		action := actions[m.serverActionIdx]
+		m.loading = true
+		m.statusMsg = fmt.Sprintf("Executing %s...", action)
+		m.state = m.previousState
+		return m, tea.Batch(m.spinner.Tick, m.serverAction(action))
+	}
+
+	return m, nil
+}
+
+// handleHelpKeyMsg handles key events in the help view.
+func (m Model) handleHelpKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.Back), key.Matches(msg, keys.Help), key.Matches(msg, keys.Quit):
+		if key.Matches(msg, keys.Quit) {
+			return m, tea.Quit
+		}
+		m.state = m.previousState
+		return m, nil
+	}
+	return m, nil
+}
+
+// SetRegistry configures the registry manager for server operations.
+func (m *Model) SetRegistry(reg *registry.Registry) {
+	m.registry = reg
+}
+
+// renderImageDetails renders the image details view.
+func (m Model) renderImageDetails() string {
+	if m.imageDetails == nil {
+		return "No image details loaded"
+	}
+
+	d := m.imageDetails
+	title := titleStyle.Render(fmt.Sprintf("Image: %s:%s", d.Repository, d.Tag))
+
+	var lines []string
+	lines = append(lines, subtitleStyle.Render("Digest: "+truncateDigest(d.Digest)))
+	lines = append(lines, subtitleStyle.Render("Content-Type: "+d.ContentType))
+
+	if len(d.Layers) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, titleStyle.Render("Layers:"))
+
+		var totalSize int64
+		for i, l := range d.Layers {
+			totalSize += l.Size
+			sizeStr := formatBytes(l.Size)
+			digestShort := l.Digest
+			if len(digestShort) > 30 {
+				digestShort = digestShort[:30] + "..."
+			}
+			line := fmt.Sprintf("  %d. %s  %s", i+1, sizeStyle.Render(sizeStr), layerStyle.Render(digestShort))
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+		lines = append(lines, sizeStyle.Render(fmt.Sprintf("Total Size: %s (%d layers)", formatBytes(totalSize), len(d.Layers))))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{title, ""}, lines...)...)
+	return content
+}
+
+// renderHelp renders the help overlay.
+func (m Model) renderHelp() string {
+	title := titleStyle.Render("Keyboard Shortcuts")
+
+	sections := []struct {
+		name  string
+		binds []struct{ key, desc string }
+	}{
+		{
+			name: "Navigation",
+			binds: []struct{ key, desc string }{
+				{"↑/k", "Move up"},
+				{"↓/j", "Move down"},
+				{"Enter", "Select / Open"},
+				{"Esc", "Go back"},
+				{"/", "Filter list"},
+			},
+		},
+		{
+			name: "Actions",
+			binds: []struct{ key, desc string }{
+				{"d", "Delete selected tag"},
+				{"i", "Image details"},
+				{"r", "Refresh"},
+				{"l", "View container logs"},
+			},
+		},
+		{
+			name: "Server",
+			binds: []struct{ key, desc string }{
+				{"s", "Server actions (start/stop/restart)"},
+				{"g", "Run garbage collection"},
+			},
+		},
+		{
+			name: "General",
+			binds: []struct{ key, desc string }{
+				{"?", "Toggle help"},
+				{"q", "Quit"},
+			},
+		},
+	}
+
+	var lines []string
+	for _, section := range sections {
+		lines = append(lines, helpSectionStyle.Render(section.name))
+		for _, b := range section.binds {
+			line := helpKeyStyle.Render(b.key) + helpDescStyle.Render(b.desc)
+			lines = append(lines, line)
+		}
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return helpOverlayStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", content))
+}
+
+// renderGarbageCollect renders the garbage collection result view.
+func (m Model) renderGarbageCollect() string {
+	title := titleStyle.Render("Garbage Collection")
+
+	if m.gcResult == nil {
+		return title + "\n\nNo results yet."
+	}
+
+	var status string
+	if m.gcResult.ExitCode == 0 {
+		status = actionSuccessStyle.Render("✓ Completed successfully")
+	} else {
+		status = actionErrorStyle.Render(fmt.Sprintf("✗ Failed (exit code: %d)", m.gcResult.ExitCode))
+	}
+
+	output := m.gcResult.Output
+	if len(output) > 1000 {
+		output = output[:1000] + "\n..."
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		status,
+		"",
+		subtitleStyle.Render("Output:"),
+		output,
+	)
+}
+
+// renderServerActions renders the server actions menu.
+func (m Model) renderServerActions() string {
+	title := titleStyle.Render("Server Actions")
+
+	actions := []struct {
+		name string
+		desc string
+	}{
+		{"start", "Start the registry container"},
+		{"stop", "Stop the registry container"},
+		{"restart", "Restart the registry container"},
+	}
+
+	var lines []string
+	for i, a := range actions {
+		prefix := "  "
+		style := normalStyle
+		if i == m.serverActionIdx {
+			prefix = "> "
+			style = selectedStyle
+		}
+		line := style.Render(fmt.Sprintf("%s%s - %s", prefix, a.name, a.desc))
+		lines = append(lines, line)
+	}
+
+	// Show current server status if available
+	var statusLine string
+	if m.serverStatus != nil {
+		if m.serverStatus.Running {
+			statusLine = statusRunningStyle.Render("● Running")
+		} else {
+			statusLine = statusStoppedStyle.Render("○ Stopped")
+		}
+		statusLine = "\n" + subtitleStyle.Render("Status: ") + statusLine
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, statusLine, "", content))
+}
+
+// renderServerStatus renders a compact server status bar.
+func (m Model) renderServerStatus() string {
+	if m.serverStatus == nil {
+		return ""
+	}
+
+	var status string
+	if m.serverStatus.Running {
+		status = statusRunningStyle.Render("● Running")
+	} else {
+		status = statusStoppedStyle.Render("○ Stopped")
+	}
+
+	info := fmt.Sprintf("Registry: %s  %s", m.serverStatus.Address, status)
+	return statusPanelStyle.Width(m.width - 4).Render(info)
+}
+
+// formatBytes formats a byte size to human readable format.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
