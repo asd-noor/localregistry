@@ -22,6 +22,18 @@ type DockerClient interface {
 	RemoveContainer(ctx context.Context, containerID string, force bool) error
 	InspectContainer(ctx context.Context, containerID string) (*container.InspectResponse, error)
 	ListContainers(ctx context.Context, all bool) ([]container.Summary, error)
+	StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
+}
+
+// LogsOptions configures container log streaming.
+type LogsOptions struct {
+	Follow     bool   // Follow log output (like tail -f)
+	Tail       string // Number of lines to show from the end (e.g., "100", "all")
+	Since      string // Show logs since timestamp (e.g., "2021-01-01T00:00:00Z") or relative (e.g., "1h")
+	Until      string // Show logs until timestamp or relative
+	Timestamps bool   // Show timestamps in output
+	Stdout     bool   // Include stdout
+	Stderr     bool   // Include stderr
 }
 
 // dockerClient implements DockerClient using the official Docker Go SDK.
@@ -124,4 +136,40 @@ func (d *dockerClient) ListContainers(ctx context.Context, all bool) ([]containe
 		return nil, fmt.Errorf("container list failed: %w", err)
 	}
 	return containers, nil
+}
+
+// StreamLogs returns an io.ReadCloser for streaming container logs.
+// The caller is responsible for closing the returned reader.
+// Note: Docker multiplexes stdout/stderr with an 8-byte header per frame when TTY is disabled.
+// Use stdcopy.StdCopy to demultiplex if needed.
+func (d *dockerClient) StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
+	slog.Debug("streaming container logs",
+		"container_id", containerID,
+		"follow", opts.Follow,
+		"tail", opts.Tail,
+	)
+
+	dockerOpts := container.LogsOptions{
+		ShowStdout: opts.Stdout,
+		ShowStderr: opts.Stderr,
+		Follow:     opts.Follow,
+		Timestamps: opts.Timestamps,
+		Tail:       opts.Tail,
+		Since:      opts.Since,
+		Until:      opts.Until,
+	}
+
+	// Default to both stdout and stderr if neither specified
+	if !dockerOpts.ShowStdout && !dockerOpts.ShowStderr {
+		dockerOpts.ShowStdout = true
+		dockerOpts.ShowStderr = true
+	}
+
+	reader, err := d.cli.ContainerLogs(ctx, containerID, dockerOpts)
+	if err != nil {
+		slog.Error("container logs failed", "container_id", containerID, "error", err)
+		return nil, fmt.Errorf("container logs failed: %w", err)
+	}
+
+	return reader, nil
 }
