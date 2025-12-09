@@ -20,6 +20,7 @@ var tuiCmd = &cobra.Command{
 The TUI provides:
   - Browse repositories and tags
   - View image details (layers, sizes)
+  - Add images to the registry
   - Delete tags
   - View container logs
   - Server management (start/stop/restart)
@@ -52,7 +53,12 @@ Examples:
 			})
 		}
 
-		err = tui.RunWithRegistry(client, reg, docker, tuiContainerName)
+		// Set up skopeo for add image functionality
+		skopeo := registry.NewSkopeo(registry.SkopeoConfig{
+			InsecurePolicy: insecure,
+		})
+
+		err = tui.RunWithFullFeatures(client, reg, docker, tuiContainerName, skopeo, insecure)
 		exitOnError(err)
 	},
 }

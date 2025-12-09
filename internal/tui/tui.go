@@ -8,10 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -33,6 +35,7 @@ const (
 	ViewHelp
 	ViewGarbageCollect
 	ViewServerActions
+	ViewAddImage
 )
 
 // Model is the main TUI model.
@@ -83,6 +86,13 @@ type Model struct {
 
 	// Server action selection
 	serverActionIdx int
+
+	// Add image state
+	addImageInput    textinput.Model
+	addImageTarget   string
+	addImageProgress string
+	skopeo           *registry.Skopeo
+	skopeoInsecure   bool
 }
 
 type deleteTarget struct {
@@ -148,6 +158,9 @@ type (
 	imageDetailsMsg     *ImageDetails
 	gcCompleteMsg       *registry.GarbageCollectResult
 	serverActionDoneMsg string
+	addImageSuccessMsg  string
+	addImageProgressMsg string
+	statusTickMsg       struct{}
 )
 
 // KeyMap defines the keybindings for the TUI.
@@ -167,6 +180,7 @@ type KeyMap struct {
 	GC      key.Binding
 	Server  key.Binding
 	Tab     key.Binding
+	Add     key.Binding
 }
 
 var keys = KeyMap{
@@ -230,6 +244,10 @@ var keys = KeyMap{
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "next option"),
 	),
+	Add: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "add image"),
+	),
 }
 
 // New creates a new TUI model.
@@ -254,14 +272,21 @@ func New(client *api.Client) Model {
 	tagList.SetFilteringEnabled(true)
 	tagList.Styles.Title = titleStyle
 
+	// Initialize text input for add image
+	ti := textinput.New()
+	ti.Placeholder = "alpine:latest or ghcr.io/org/image:tag"
+	ti.CharLimit = 256
+	ti.Width = 50
+
 	return Model{
-		client:   client,
-		ctx:      context.Background(),
-		state:    ViewRepositories,
-		spinner:  s,
-		repoList: repoList,
-		tagList:  tagList,
-		loading:  true,
+		client:        client,
+		ctx:           context.Background(),
+		state:         ViewRepositories,
+		spinner:       s,
+		repoList:      repoList,
+		tagList:       tagList,
+		loading:       true,
+		addImageInput: ti,
 	}
 }
 
@@ -270,6 +295,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.loadRepositories(),
+		m.loadServerStatus(),
+		m.tickServerStatus(),
 	)
 }
 
@@ -385,6 +412,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.statusMsg = successStyle.Render(string(msg))
 		return m, nil
+
+	case addImageSuccessMsg:
+		m.loading = false
+		m.addImageProgress = ""
+		m.statusMsg = successStyle.Render(string(msg))
+		m.state = ViewRepositories
+		return m, m.loadRepositories()
+
+	case addImageProgressMsg:
+		m.addImageProgress = string(msg)
+		return m, nil
+
+	case statusTickMsg:
+		return m, tea.Batch(m.loadServerStatus(), m.tickServerStatus())
 	}
 
 	switch m.state {
@@ -400,6 +441,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.logsViewport, cmd = m.logsViewport.Update(msg)
 		cmds = append(cmds, cmd)
+	case ViewAddImage:
+		var cmd tea.Cmd
+		m.addImageInput, cmd = m.addImageInput.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -414,6 +459,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHelpKeyMsg(msg)
 	case ViewServerActions:
 		return m.handleServerActionsKeyMsg(msg)
+	case ViewAddImage:
+		return m.handleAddImageKeyMsg(msg)
 	}
 
 	switch {
@@ -530,6 +577,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.serverActionIdx = 0
 			return m, nil
 		}
+
+	case key.Matches(msg, keys.Add):
+		// Show add image dialog
+		if m.skopeo != nil && m.state == ViewRepositories {
+			m.previousState = m.state
+			m.state = ViewAddImage
+			m.addImageInput.Reset()
+			m.addImageInput.Focus()
+			m.addImageProgress = ""
+			return m, m.addImageInput.Focus()
+		}
 	}
 
 	var cmd tea.Cmd
@@ -624,6 +682,9 @@ func (m Model) View() string {
 			baseContent = ""
 		}
 		content = baseContent + "\n" + m.renderServerActions()
+	case ViewAddImage:
+		// Render add image dialog as overlay
+		content = m.repoList.View() + "\n" + m.renderAddImage()
 	}
 
 	if m.loading {
@@ -699,6 +760,8 @@ func (m Model) renderStatusBar() string {
 		status = "Garbage Collection"
 	case ViewServerActions:
 		status = "Server Actions"
+	case ViewAddImage:
+		status = "Add Image"
 	}
 
 	var help string
@@ -711,8 +774,10 @@ func (m Model) renderStatusBar() string {
 		help = helpStyle.Render("↑/↓: select • enter: execute • esc: cancel")
 	case ViewImageDetails, ViewGarbageCollect:
 		help = helpStyle.Render("esc: back • q: quit")
+	case ViewAddImage:
+		help = helpStyle.Render("enter: add image • esc: cancel")
 	default:
-		help = helpStyle.Render("?: help • i: details • s: server • g: gc • d: delete • r: refresh • q: quit")
+		help = helpStyle.Render("?: help • a: add • i: details • s: server • g: gc • d: delete • r: refresh • q: quit")
 	}
 	bar := statusBarStyle.Width(m.width).Render(status)
 
@@ -801,6 +866,26 @@ func RunWithRegistry(client *api.Client, reg *registry.Registry, docker registry
 	slog.Debug("starting tui application with registry management", "container_id", containerID)
 	m := New(client)
 	m.registry = reg
+	if docker != nil {
+		m.logsDocker = docker
+		m.logsContainer = containerID
+	}
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	if err != nil {
+		slog.Error("tui application error", "error", err)
+	}
+	slog.Debug("tui application exited")
+	return err
+}
+
+// RunWithFullFeatures starts the TUI application with all features enabled.
+func RunWithFullFeatures(client *api.Client, reg *registry.Registry, docker registry.DockerClient, containerID string, skopeo *registry.Skopeo, insecure bool) error {
+	slog.Debug("starting tui application with full features", "container_id", containerID)
+	m := New(client)
+	m.registry = reg
+	m.skopeo = skopeo
+	m.skopeoInsecure = insecure
 	if docker != nil {
 		m.logsDocker = docker
 		m.logsContainer = containerID
@@ -1342,6 +1427,7 @@ func (m Model) renderHelp() string {
 		{
 			name: "Actions",
 			binds: []struct{ key, desc string }{
+				{"a", "Add image to registry"},
 				{"d", "Delete selected tag"},
 				{"i", "Image details"},
 				{"r", "Refresh"},
@@ -1476,4 +1562,152 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// tickServerStatus returns a command that ticks every 5 seconds to refresh server status.
+func (m Model) tickServerStatus() tea.Cmd {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return statusTickMsg{}
+	})
+}
+
+// handleAddImageKeyMsg handles key events in the add image view.
+func (m Model) handleAddImageKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.state = m.previousState
+		m.addImageInput.Blur()
+		m.addImageProgress = ""
+		return m, nil
+
+	case tea.KeyEnter:
+		source := strings.TrimSpace(m.addImageInput.Value())
+		if source == "" {
+			return m, nil
+		}
+		m.loading = true
+		m.statusMsg = "Adding image..."
+		return m, tea.Batch(m.spinner.Tick, m.addImage(source))
+	}
+
+	// Pass through to text input
+	var cmd tea.Cmd
+	m.addImageInput, cmd = m.addImageInput.Update(msg)
+	return m, cmd
+}
+
+// renderAddImage renders the add image dialog.
+func (m Model) renderAddImage() string {
+	title := titleStyle.Render("Add Image to Registry")
+
+	hint := dimmedStyle.Render("Enter source image reference (e.g., alpine:latest, ghcr.io/org/image:tag)")
+
+	inputView := m.addImageInput.View()
+
+	var progressView string
+	if m.addImageProgress != "" {
+		progressView = "\n" + progressStyle.Render(m.addImageProgress)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", hint, "", inputView, progressView)
+	return dialogBoxStyle.Render(content)
+}
+
+// addImage returns a command that adds an image to the registry using skopeo.
+func (m Model) addImage(source string) tea.Cmd {
+	return func() tea.Msg {
+		if m.skopeo == nil {
+			return errMsg(fmt.Errorf("skopeo not configured"))
+		}
+
+		// Extract target name from source
+		target := extractImageName(source)
+
+		// Build destination reference
+		dest := fmt.Sprintf("%s/%s", m.client.Address(), target)
+
+		// Determine source reference
+		srcRef := determineSourceRef(source)
+
+		// Build copy options
+		opts := &registry.CopyOptions{
+			Quiet: true,
+		}
+
+		destVerify := !m.skopeoInsecure
+		opts.DestTLSVerify = &destVerify
+
+		destRef := registry.ImageRef(registry.TransportDocker, dest)
+
+		ctx := context.Background()
+		if err := m.skopeo.Copy(ctx, srcRef, destRef, opts); err != nil {
+			return errMsg(fmt.Errorf("failed to add image: %w", err))
+		}
+
+		return addImageSuccessMsg(fmt.Sprintf("Successfully added %s", dest))
+	}
+}
+
+// extractImageName extracts the image name from a full reference.
+func extractImageName(ref string) string {
+	// Remove transport prefix if present
+	ref = strings.TrimPrefix(ref, "docker://")
+	ref = strings.TrimPrefix(ref, "docker-daemon:")
+
+	// Check if it has a registry prefix (contains a dot before the first slash)
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) == 2 && strings.Contains(parts[0], ".") {
+		return parts[1]
+	}
+
+	// Check for docker.io/library/ prefix
+	if strings.HasPrefix(ref, "docker.io/library/") {
+		return strings.TrimPrefix(ref, "docker.io/library/")
+	}
+	if strings.HasPrefix(ref, "docker.io/") {
+		return strings.TrimPrefix(ref, "docker.io/")
+	}
+
+	return ref
+}
+
+// determineSourceRef determines the appropriate skopeo source reference.
+func determineSourceRef(source string) string {
+	// If it already has a transport prefix, use as-is
+	if strings.HasPrefix(source, "docker://") ||
+		strings.HasPrefix(source, "docker-daemon:") ||
+		strings.HasPrefix(source, "oci:") ||
+		strings.HasPrefix(source, "dir:") {
+		return source
+	}
+
+	// Check if image exists locally in Docker daemon
+	docker, err := registry.NewDockerClient()
+	if err == nil {
+		ctx := context.Background()
+		exists, checkErr := docker.ImageExists(ctx, source)
+		if checkErr == nil && exists {
+			return registry.ImageRef(registry.TransportDockerDaemon, source)
+		}
+	}
+
+	// Not found locally - determine the remote registry reference
+	if !strings.Contains(source, "/") {
+		// Bare image name like "alpine" - assume Docker Hub library
+		return registry.ImageRef(registry.TransportDocker, "docker.io/library/"+source)
+	}
+
+	// Check if it looks like a Docker Hub image (no dots in first segment)
+	parts := strings.SplitN(source, "/", 2)
+	if !strings.Contains(parts[0], ".") && !strings.Contains(parts[0], ":") {
+		return registry.ImageRef(registry.TransportDocker, "docker.io/"+source)
+	}
+
+	return registry.ImageRef(registry.TransportDocker, source)
+}
+
+// SetSkopeo configures skopeo for image operations.
+func (m *Model) SetSkopeo(skopeo *registry.Skopeo, insecure bool) {
+	m.skopeo = skopeo
+	m.skopeoInsecure = insecure
 }

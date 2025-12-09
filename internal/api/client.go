@@ -295,3 +295,11 @@ func parseLinkHeader(link string) string {
 	urlPart = strings.TrimSuffix(urlPart, ">")
 	return urlPart
 }
+
+// Address returns the registry address (host:port) without protocol prefix.
+func (c *Client) Address() string {
+	addr := c.baseURL
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
+	return addr
+}
