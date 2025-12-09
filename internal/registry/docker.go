@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +27,7 @@ type DockerClient interface {
 	ListContainers(ctx context.Context, all bool) ([]container.Summary, error)
 	StreamLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
 	CopyLogs(ctx context.Context, containerID string, stdout, stderr io.Writer, opts LogsOptions) error
+	FormatLogs(ctx context.Context, containerID string, w io.Writer, opts LogsOptions) error
 }
 
 // LogsOptions configures container log streaming.
@@ -207,4 +210,99 @@ func (d *dockerClient) CopyLogs(ctx context.Context, containerID string, stdout,
 	}
 
 	return nil
+}
+
+// FormatLogs streams container logs with [STDOUT] and [STDERR] prefixes for each line.
+// Output is written to a single writer with prefixes indicating the source stream.
+// This is useful for CLI display and TUI integration where stream distinction is needed.
+func (d *dockerClient) FormatLogs(ctx context.Context, containerID string, w io.Writer, opts LogsOptions) error {
+	reader, err := d.StreamLogs(ctx, containerID, opts)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	// Check if container uses TTY
+	inspect, err := d.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		slog.Error("container inspect failed during log format", "container_id", containerID, "error", err)
+		return fmt.Errorf("container inspect failed: %w", err)
+	}
+
+	if inspect.Config.Tty {
+		// TTY mode: no multiplexing, prefix all as stdout
+		return prefixLines(reader, w, "[STDOUT]: ")
+	}
+
+	// Non-TTY: demultiplex and prefix each stream
+	return demuxAndPrefixLogs(reader, w)
+}
+
+// prefixLines reads lines from r and writes them to w with the given prefix.
+func prefixLines(r io.Reader, w io.Writer, prefix string) error {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		if _, err := fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text()); err != nil {
+			return fmt.Errorf("write failed: %w", err)
+		}
+	}
+	return scanner.Err()
+}
+
+// demuxAndPrefixLogs reads Docker's multiplexed log stream and writes prefixed lines.
+// Docker's multiplex format: [stream_type(1)][0(3)][size(4)][payload(size)]
+func demuxAndPrefixLogs(r io.Reader, w io.Writer) error {
+	header := make([]byte, 8)
+
+	for {
+		// Read the 8-byte header
+		_, err := io.ReadFull(r, header)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read header failed: %w", err)
+		}
+
+		// Parse header: byte 0 is stream type, bytes 4-7 are payload size (big endian)
+		streamType := header[0]
+		size := binary.BigEndian.Uint32(header[4:8])
+
+		// Determine prefix based on stream type
+		var prefix string
+		switch streamType {
+		case 1:
+			prefix = "[STDOUT]: "
+		case 2:
+			prefix = "[STDERR]: "
+		default:
+			prefix = "[UNKNOWN]: "
+		}
+
+		// Read the payload
+		payload := make([]byte, size)
+		_, err = io.ReadFull(r, payload)
+		if err != nil {
+			return fmt.Errorf("read payload failed: %w", err)
+		}
+
+		// Process payload: split into lines and prefix each
+		start := 0
+		for i := 0; i < len(payload); i++ {
+			if payload[i] == '\n' {
+				line := string(payload[start:i])
+				if _, err := fmt.Fprintf(w, "%s%s\n", prefix, line); err != nil {
+					return fmt.Errorf("write failed: %w", err)
+				}
+				start = i + 1
+			}
+		}
+		// Handle trailing content without newline
+		if start < len(payload) {
+			line := string(payload[start:])
+			if _, err := fmt.Fprintf(w, "%s%s\n", prefix, line); err != nil {
+				return fmt.Errorf("write failed: %w", err)
+			}
+		}
+	}
 }
