@@ -10,6 +10,8 @@
 package config
 
 import (
+	"bytes"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +20,9 @@ import (
 
 	"github.com/spf13/viper"
 )
+
+//go:embed default_config.yaml
+var defaultConfigYAML []byte
 
 // Config holds the application configuration.
 type Config struct {
@@ -29,25 +34,26 @@ type Config struct {
 // Load initializes and returns the application configuration.
 // It loads configuration from the OS-appropriate config directory (e.g.,
 // $HOME/.config/localregistry/config.yaml on Linux), with fallback to
-// defaults if the file doesn't exist.
+// embedded defaults if the file doesn't exist.
 // Environment variables prefixed with LOCALREGISTRY_ override config file values.
 func Load() (*Config, error) {
 	v := viper.New()
 
-	// Set defaults (lowest priority)
-	setDefaults(v)
-
-	// Set up config file path
-	if err := setupConfigFile(v); err != nil {
-		return nil, fmt.Errorf("failed to setup config file: %w", err)
+	// Load embedded defaults first (lowest priority)
+	v.SetConfigType("yaml")
+	if err := v.ReadConfig(bytes.NewReader(defaultConfigYAML)); err != nil {
+		return nil, fmt.Errorf("failed to read embedded default config: %w", err)
 	}
 
-	// Enable environment variable binding (higher priority than config file)
-	v.SetEnvPrefix("LOCALREGISTRY")
-	v.AutomaticEnv()
+	// Set up user config file path
+	configPath, err := configFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine config path: %w", err)
+	}
 
-	// Read config file (ignore if not found)
-	if err := v.ReadInConfig(); err != nil {
+	// Merge user config file if it exists (higher priority than defaults)
+	v.SetConfigFile(configPath)
+	if err := v.MergeInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
 			// File not found is acceptable - we have defaults
@@ -58,6 +64,10 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
 	}
+
+	// Enable environment variable binding (highest priority)
+	v.SetEnvPrefix("LOCALREGISTRY")
+	v.AutomaticEnv()
 
 	// Unmarshal into struct
 	var cfg Config
@@ -99,29 +109,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// setDefaults configures default values for all configuration options.
-func setDefaults(v *viper.Viper) {
-	v.SetDefault("port", 5000)
-	v.SetDefault("host", "localhost")
-	v.SetDefault("log_level", "info")
-}
-
-// setupConfigFile configures Viper to read from the OS-appropriate config directory.
-// On Linux: $HOME/.config/localregistry/config.yaml
-// On macOS: $HOME/Library/Application Support/localregistry/config.yaml
-// On Windows: %AppData%/localregistry/config.yaml
-func setupConfigFile(v *viper.Viper) error {
-	configPath, err := configFilePath()
-	if err != nil {
-		return err
-	}
-
-	v.SetConfigFile(configPath)
-	v.SetConfigType("yaml")
-
-	return nil
-}
-
 // configFilePath returns the full path to the config file.
 func configFilePath() (string, error) {
 	configDir, err := os.UserConfigDir()
@@ -135,4 +122,9 @@ func configFilePath() (string, error) {
 // This is useful for debugging or displaying to users.
 func ConfigFilePath() (string, error) {
 	return configFilePath()
+}
+
+// DefaultConfig returns the embedded default configuration as bytes.
+func DefaultConfig() []byte {
+	return defaultConfigYAML
 }

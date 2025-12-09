@@ -1,0 +1,6 @@
+# Default configuration for localregistry
+# These values are used when no user config file exists.
+
+port: 5000
+host: localhost
+log_level: info
