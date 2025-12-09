@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"localregistry/config"
+
 	"github.com/spf13/cobra"
 )
 
@@ -12,6 +14,9 @@ var (
 	Version = "dev"
 	Commit  = "none"
 )
+
+// cfg holds the loaded configuration
+var cfg *config.Config
 
 var rootCmd = &cobra.Command{
 	Use:   "localregistry",
@@ -21,10 +26,38 @@ var rootCmd = &cobra.Command{
 Provides commands to list repositories, tags, manifests, and blobs,
 as well as delete operations for registry management.
 
-Environment variables:
-  REGISTRY_URL   Registry URL (default: http://localhost:5000)
-  REGISTRY_USER  Username for basic auth
-  REGISTRY_PASS  Password for basic auth`,
+Configuration is loaded from (in order of precedence):
+  1. Command-line flags
+  2. Environment variables (LOCALREGISTRY_REGISTRY_URL, etc.)
+  3. Config file (~/.config/localregistry/config.yaml)
+  4. Embedded defaults`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Load configuration before any command runs
+		var err error
+		cfg, err = config.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
+		}
+
+		// Apply config values as defaults for flags not explicitly set
+		if !cmd.Flags().Changed("url") {
+			registryURL = cfg.Registry.URL
+		}
+		if !cmd.Flags().Changed("user") {
+			username = cfg.Registry.Username
+		}
+		if !cmd.Flags().Changed("pass") {
+			password = cfg.Registry.Password
+		}
+		if !cmd.Flags().Changed("insecure") {
+			insecure = cfg.Registry.Insecure
+		}
+		if !cmd.Flags().Changed("timeout") {
+			timeout = cfg.Registry.Timeout
+		}
+
+		return nil
+	},
 }
 
 var versionCmd = &cobra.Command{
@@ -35,21 +68,42 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Show configuration information",
+	Run: func(cmd *cobra.Command, args []string) {
+		configPath, err := config.ConfigFilePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		fmt.Printf("Config file: %s\n", configPath)
+		fmt.Printf("\nCurrent settings:\n")
+		fmt.Printf("  Registry URL: %s\n", registryURL)
+		fmt.Printf("  Username:     %s\n", username)
+		fmt.Printf("  Insecure:     %v\n", insecure)
+		fmt.Printf("  Timeout:      %s\n", timeout)
+		if cfg != nil {
+			fmt.Printf("  Log Level:    %s\n", cfg.LogLevel)
+		}
+	},
+}
+
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&registryURL, "url", "u", envOrDefault("REGISTRY_URL", "http://localhost:5000"), "Registry URL")
-	rootCmd.PersistentFlags().StringVar(&username, "user", os.Getenv("REGISTRY_USER"), "Username for basic auth")
-	rootCmd.PersistentFlags().StringVar(&password, "pass", os.Getenv("REGISTRY_PASS"), "Password for basic auth")
+	// Define flags with placeholder defaults; actual defaults come from config in PersistentPreRunE
+	rootCmd.PersistentFlags().StringVarP(&registryURL, "url", "u", "http://localhost:5000", "Registry URL")
+	rootCmd.PersistentFlags().StringVar(&username, "user", "", "Username for basic auth")
+	rootCmd.PersistentFlags().StringVar(&password, "pass", "", "Password for basic auth")
 	rootCmd.PersistentFlags().BoolVarP(&insecure, "insecure", "k", false, "Skip TLS certificate verification")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Request timeout")
 
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
-func envOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultVal
+// GetConfig returns the loaded configuration. May be nil if called before Execute().
+func GetConfig() *config.Config {
+	return cfg
 }
 
 func Execute() {

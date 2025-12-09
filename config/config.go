@@ -3,10 +3,13 @@
 // (e.g., ~/.config/localregistry/config.yaml on Linux) using Viper,
 // with support for environment variables and sensible defaults.
 //
-// Recognized environment variables:
-//   - LOCALREGISTRY_PORT (integer, 1-65535)
-//   - LOCALREGISTRY_HOST (string, non-empty)
-//   - LOCALREGISTRY_LOG_LEVEL (string, one of: debug, info, warn, error, case-insensitive)
+// Recognized environment variables (prefix LOCALREGISTRY_):
+//   - LOCALREGISTRY_REGISTRY_URL (string)
+//   - LOCALREGISTRY_REGISTRY_USERNAME (string)
+//   - LOCALREGISTRY_REGISTRY_PASSWORD (string)
+//   - LOCALREGISTRY_REGISTRY_INSECURE (bool)
+//   - LOCALREGISTRY_REGISTRY_TIMEOUT (duration, e.g. "30s")
+//   - LOCALREGISTRY_LOG_LEVEL (string, one of: debug, info, warn, error)
 package config
 
 import (
@@ -17,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -24,11 +28,19 @@ import (
 //go:embed default_config.yaml
 var defaultConfigYAML []byte
 
+// RegistryConfig holds registry connection settings.
+type RegistryConfig struct {
+	URL      string        `mapstructure:"url"`
+	Username string        `mapstructure:"username"`
+	Password string        `mapstructure:"password"`
+	Insecure bool          `mapstructure:"insecure"`
+	Timeout  time.Duration `mapstructure:"timeout"`
+}
+
 // Config holds the application configuration.
 type Config struct {
-	Port     int    `mapstructure:"port"`
-	Host     string `mapstructure:"host"`
-	LogLevel string `mapstructure:"log_level"`
+	Registry RegistryConfig `mapstructure:"registry"`
+	LogLevel string         `mapstructure:"log_level"`
 }
 
 // Load initializes and returns the application configuration.
@@ -67,6 +79,7 @@ func Load() (*Config, error) {
 
 	// Enable environment variable binding (highest priority)
 	v.SetEnvPrefix("LOCALREGISTRY")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	// Unmarshal into struct
@@ -84,13 +97,12 @@ func Load() (*Config, error) {
 }
 
 // Validate ensures the configuration values are valid.
-// Log level is normalized to lowercase for case-insensitive comparison.
 func (c *Config) Validate() error {
-	if c.Port <= 0 || c.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	if c.Registry.URL == "" {
+		return fmt.Errorf("registry.url must not be empty")
 	}
-	if c.Host == "" {
-		return fmt.Errorf("host must not be empty")
+	if c.Registry.Timeout < 0 {
+		return fmt.Errorf("registry.timeout must be non-negative")
 	}
 
 	// Normalize log level to lowercase for case-insensitive validation
