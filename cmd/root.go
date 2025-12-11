@@ -21,7 +21,7 @@ var (
 var cfg *config.Config
 
 var rootCmd = &cobra.Command{
-	Use:   "localregistry",
+	Use:   "local-registry",
 	Short: "Local Docker Registry CLI",
 	Long: `A command-line tool for interacting with Docker Registry HTTP API V2.
 
@@ -37,6 +37,7 @@ Configuration is loaded from (in order of precedence):
 		slog.Debug("applying configuration",
 			"host", cfg.Registry.Host,
 			"port", cfg.Registry.Port,
+			"container_name", cfg.Registry.ContainerName,
 			"insecure", cfg.Registry.Insecure,
 			"timeout", cfg.Registry.Timeout,
 		)
@@ -109,7 +110,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&registryPort, "port", "p", 5000, "Registry port")
 	rootCmd.PersistentFlags().StringVar(&username, "user", "", "Username for basic auth")
 	rootCmd.PersistentFlags().StringVar(&password, "pass", "", "Password for basic auth")
-	rootCmd.PersistentFlags().BoolVarP(&insecure, "insecure", "k", false, "Skip TLS certificate verification")
+	rootCmd.PersistentFlags().BoolVarP(&insecure, "insecure", "k", false, "Skip TLS verification (for HTTPS registries)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Request timeout")
 
 	rootCmd.AddCommand(versionCmd)

@@ -45,6 +45,11 @@ Examples:
 	Args: cobra.RangeArgs(1, 2),
 	Run: func(cmd *cobra.Command, args []string) {
 		source := args[0]
+		if strings.TrimSpace(source) == "" {
+			fmt.Fprintln(os.Stderr, "Error: source image cannot be empty")
+			os.Exit(1)
+		}
+
 		target := ""
 		if len(args) > 1 {
 			target = args[1]
@@ -70,10 +75,10 @@ Examples:
 		}
 
 		// Handle TLS verification
-		srcVerify := addSrcVerify
-		destVerify := !insecure
-		opts.SrcTLSVerify = &srcVerify
-		opts.DestTLSVerify = &destVerify
+		// Source TLS verify defaults true for remote registries
+		// Destination TLS verify defaults false for local HTTP registry
+		opts.SrcTLSVerify = &addSrcVerify
+		opts.DestTLSVerify = &addDestVerify
 
 		// Handle credentials
 		if addSrcCreds != "" {
@@ -300,7 +305,7 @@ func init() {
 	addCmd.Flags().StringVar(&addSrcCreds, "src-creds", "", "Source credentials (user:password)")
 	addCmd.Flags().StringVar(&addDestCreds, "dest-creds", "", "Destination credentials (user:password)")
 	addCmd.Flags().BoolVar(&addSrcVerify, "src-tls-verify", true, "Verify source TLS certificates")
-	addCmd.Flags().BoolVar(&addDestVerify, "dest-tls-verify", true, "Verify destination TLS certificates")
+	addCmd.Flags().BoolVar(&addDestVerify, "dest-tls-verify", false, "Verify destination TLS certificates (set true for HTTPS registries)")
 
 	// Copy command flags (reuse add flags)
 	copyCmd.Flags().BoolVarP(&addAll, "all", "a", false, "Copy all architectures (multi-arch images)")
@@ -308,7 +313,7 @@ func init() {
 	copyCmd.Flags().StringVar(&addSrcCreds, "src-creds", "", "Source credentials (user:password)")
 	copyCmd.Flags().StringVar(&addDestCreds, "dest-creds", "", "Destination credentials (user:password)")
 	copyCmd.Flags().BoolVar(&addSrcVerify, "src-tls-verify", true, "Verify source TLS certificates")
-	copyCmd.Flags().BoolVar(&addDestVerify, "dest-tls-verify", true, "Verify destination TLS certificates")
+	copyCmd.Flags().BoolVar(&addDestVerify, "dest-tls-verify", false, "Verify destination TLS certificates")
 
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(inspectCmd)

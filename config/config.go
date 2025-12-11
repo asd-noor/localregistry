@@ -5,6 +5,10 @@
 //
 // Recognized environment variables (prefix LR_):
 //   - LR_REGISTRY_URL (string)
+//   - LR_REGISTRY_HOST (string)
+//   - LR_REGISTRY_PORT (int)
+//   - LR_REGISTRY_CONTAINER_NAME (string)
+//   - LR_REGISTRY_DATADIR (string)
 //   - LR_REGISTRY_USERNAME (string)
 //   - LR_REGISTRY_PASSWORD (string)
 //   - LR_REGISTRY_INSECURE (bool)
@@ -32,12 +36,14 @@ var defaultConfigYAML []byte
 // RegistryConfig holds registry connection settings.
 type RegistryConfig struct {
 	// URL      string        `mapstructure:"url"`
-	Host     string        `mapstructure:"host"`
-	Port     int           `mapstructure:"port"`
-	Username string        `mapstructure:"username"`
-	Password string        `mapstructure:"password"`
-	Insecure bool          `mapstructure:"insecure"`
-	Timeout  time.Duration `mapstructure:"timeout"`
+	Host          string        `mapstructure:"host"`
+	Port          int           `mapstructure:"port"`
+	ContainerName string        `mapstructure:"container_name"`
+	DataDir       string        `mapstructure:"datadir"`
+	Username      string        `mapstructure:"username"`
+	Password      string        `mapstructure:"password"`
+	Insecure      bool          `mapstructure:"insecure"`
+	Timeout       time.Duration `mapstructure:"timeout"`
 }
 
 // Config holds the application configuration.
@@ -113,6 +119,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("registry.timeout must be non-negative")
 	}
 
+	// Expand DataDir path (handle $XDG_DATA_HOME and ~)
+	if c.Registry.DataDir != "" {
+		expanded, err := expandPath(c.Registry.DataDir)
+		if err != nil {
+			return fmt.Errorf("failed to expand datadir path: %w", err)
+		}
+		c.Registry.DataDir = expanded
+	}
+
 	// Normalize log level to lowercase for case-insensitive validation
 	normalizedLevel := strings.ToLower(c.LogLevel)
 
@@ -127,6 +142,39 @@ func (c *Config) Validate() error {
 	}
 	c.LogLevel = normalizedLevel
 	return nil
+}
+
+// expandPath expands environment variables and ~ in file paths.
+// Handles $XDG_DATA_HOME with fallback to $HOME/.local/share
+func expandPath(path string) (string, error) {
+	// Handle ~ prefix
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		path = filepath.Join(homeDir, path[2:])
+	}
+
+	// Expand environment variables
+	// Special handling for $XDG_DATA_HOME
+	if strings.Contains(path, "$XDG_DATA_HOME") {
+		xdgDataHome := os.Getenv("XDG_DATA_HOME")
+		if xdgDataHome == "" {
+			// Fallback to $HOME/.local/share per XDG Base Directory spec
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("cannot determine home directory: %w", err)
+			}
+			xdgDataHome = filepath.Join(homeDir, ".local", "share")
+		}
+		path = strings.ReplaceAll(path, "$XDG_DATA_HOME", xdgDataHome)
+	}
+
+	// Expand any remaining environment variables
+	path = os.ExpandEnv(path)
+
+	return path, nil
 }
 
 // SlogLevel returns the slog.Level corresponding to the configured LogLevel.

@@ -7,12 +7,20 @@ import (
 )
 
 var tagsCmd = &cobra.Command{
-	Use:   "tags <repository>",
+	Use:   "tags <image>",
 	Short: "List tags for a repository",
-	Long:  "Retrieve and display all tags for the specified repository.",
-	Args:  cobra.ExactArgs(1),
+	Long: `Retrieve and display all tags for the specified image/repository.
+
+If a tag is provided in the image reference, it will be ignored.
+
+Examples:
+  localregistry tags alpine
+  localregistry tags library/alpine
+  localregistry tags alpine:latest  # tag is ignored, lists all tags`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		repo := args[0]
+		// Strip any tag from the input - we only need the repository name
+		repo := stripTag(args[0])
 
 		client, err := newClient()
 		exitOnError(err)

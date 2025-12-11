@@ -42,14 +42,27 @@ Examples:
 		client, err := api.NewClient(cfg)
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := tuiContainerName
+		if !cmd.Flags().Changed("container") && GetConfig() != nil {
+			cname = GetConfig().Registry.ContainerName
+		}
+
+		// Get data directory from config
+		dataDir := ""
+		if GetConfig() != nil {
+			dataDir = GetConfig().Registry.DataDir
+		}
+
 		// Try to set up Docker client and registry manager for server features
 		docker, dockerErr := registry.NewDockerClient()
 		var reg *registry.Registry
 		if dockerErr == nil {
 			reg = registry.NewRegistry(docker, registry.RegistryConfig{
-				ContainerName: tuiContainerName,
+				ContainerName: cname,
 				HostName:      registryHost,
 				HostPort:      fmt.Sprintf("%d", registryPort),
+				DataVolume:    dataDir,
 			})
 		}
 
@@ -58,12 +71,12 @@ Examples:
 			InsecurePolicy: insecure,
 		})
 
-		err = tui.RunWithFullFeatures(client, reg, docker, tuiContainerName, skopeo, insecure)
+		err = tui.RunWithFullFeatures(client, reg, docker, cname, skopeo, insecure)
 		exitOnError(err)
 	},
 }
 
 func init() {
-	tuiCmd.Flags().StringVar(&tuiContainerName, "container", "registry", "Registry container name")
+	tuiCmd.Flags().StringVar(&tuiContainerName, "container", "", "Registry container name")
 	rootCmd.AddCommand(tuiCmd)
 }

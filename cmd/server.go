@@ -27,10 +27,23 @@ var serverStartCmd = &cobra.Command{
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
+		// Get data directory from config
+		dataDir := ""
+		if cfg != nil {
+			dataDir = cfg.Registry.DataDir
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 			HostPort:      fmt.Sprintf("%d", registryPort),
 			HostName:      registryHost,
+			DataVolume:    dataDir,
 		})
 
 		ctx := newContext()
@@ -51,8 +64,14 @@ var serverStopCmd = &cobra.Command{
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 		})
 
 		ctx := newContext()
@@ -73,8 +92,14 @@ var serverRestartCmd = &cobra.Command{
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 		})
 
 		ctx := newContext()
@@ -95,8 +120,14 @@ var serverStatusCmd = &cobra.Command{
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 		})
 
 		ctx := newContext()
@@ -115,8 +146,14 @@ var serverInfoCmd = &cobra.Command{
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 		})
 
 		ctx := newContext()
@@ -165,8 +202,14 @@ Example:
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)
 
+		// Use config value if flag wasn't explicitly set
+		cname := containerName
+		if !cmd.Flags().Changed("container") && cfg != nil {
+			cname = cfg.Registry.ContainerName
+		}
+
 		reg := registry.NewRegistry(docker, registry.RegistryConfig{
-			ContainerName: containerName,
+			ContainerName: cname,
 		})
 
 		ctx := newContext()
@@ -190,7 +233,8 @@ Example:
 
 func init() {
 	// Add persistent flag for container name to server command
-	serverCmd.PersistentFlags().StringVar(&containerName, "container", "registry", "Registry container name")
+	// Empty default - falls back to config value (cfg.Registry.ContainerName)
+	serverCmd.PersistentFlags().StringVar(&containerName, "container", "", "Registry container name")
 
 	// Add gc-specific flags
 	serverGCCmd.Flags().BoolVar(&gcDeleteUntagged, "delete-untagged", true, "Delete untagged manifests")

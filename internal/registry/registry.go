@@ -97,12 +97,45 @@ func NewRegistry(docker DockerClient, config RegistryConfig) *Registry {
 }
 
 // Start pulls the registry image (if needed) and starts the registry container.
+// If a container with the same name already exists:
+//   - If it's running, returns successfully (idempotent)
+//   - If it's stopped, starts the existing container
+//   - If it doesn't exist, creates and starts a new container
 func (r *Registry) Start(ctx context.Context) error {
 	slog.Debug("starting registry container",
 		"image", r.config.Image,
 		"container_name", r.config.ContainerName,
 		"host_port", r.config.HostPort,
 	)
+
+	// Check if container already exists
+	err := r.findContainer(ctx)
+	if err == nil {
+		// Container exists, check its status
+		inspect, err := r.docker.InspectContainer(ctx, r.containerID)
+		if err != nil {
+			slog.Error("failed to inspect existing container", "container_id", r.containerID, "error", err)
+			return fmt.Errorf("failed to inspect existing container: %w", err)
+		}
+
+		if inspect.State.Running {
+			slog.Info("registry container already running", "container_id", r.containerID, "address", r.Address())
+			return nil
+		}
+
+		// Container exists but is stopped, start it
+		slog.Debug("starting existing stopped container", "container_id", r.containerID)
+		if err := r.docker.StartContainer(ctx, r.containerID); err != nil {
+			slog.Error("failed to start existing container", "container_id", r.containerID, "error", err)
+			return fmt.Errorf("failed to start existing container: %w", err)
+		}
+
+		slog.Info("registry container started", "container_id", r.containerID, "address", r.Address())
+		return nil
+	}
+
+	// Container doesn't exist, create a new one
+	slog.Debug("container not found, creating new one", "container_name", r.config.ContainerName)
 
 	if err := r.docker.PullImage(ctx, r.config.Image); err != nil {
 		slog.Error("failed to pull registry image", "image", r.config.Image, "error", err)

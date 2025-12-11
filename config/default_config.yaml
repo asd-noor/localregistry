@@ -5,7 +5,8 @@
 registry:
   host: localhost
   port: 5000
-  datadir: "~/.local/data/localregistry"
+  container_name: registry
+  datadir: "$XDG_DATA_HOME/local-registry"
   username: ""
   password: ""
   insecure: false

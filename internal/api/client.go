@@ -46,11 +46,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 
 	baseURL := cfg.Address
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		if cfg.Insecure {
-			baseURL = "http://" + baseURL
-		} else {
-			baseURL = "https://" + baseURL
-		}
+		// Default to HTTP for local registries
+		baseURL = "http://" + baseURL
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
