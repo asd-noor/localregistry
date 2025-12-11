@@ -30,50 +30,58 @@ Examples:
   local-registry tui
   local-registry tui --container my-registry`,
 	Run: func(cmd *cobra.Command, args []string) {
-		address := fmt.Sprintf("%s:%d", registryHost, registryPort)
-		cfg := api.ClientConfig{
-			Address:  address,
-			Username: username,
-			Password: password,
-			Insecure: insecure,
-			Timeout:  timeout,
-		}
+		runTUI(cmd)
+	},
+}
 
-		client, err := api.NewClient(cfg)
-		exitOnError(err)
+// runTUI launches the TUI application. It uses the provided command to check
+// if the --container flag was explicitly set.
+func runTUI(cmd *cobra.Command) {
+	address := fmt.Sprintf("%s:%d", registryHost, registryPort)
+	cfg := api.ClientConfig{
+		Address:  address,
+		Username: username,
+		Password: password,
+		Insecure: insecure,
+		Timeout:  timeout,
+	}
 
-		// Use config value if flag wasn't explicitly set
-		cname := tuiContainerName
-		if !cmd.Flags().Changed("container") && GetConfig() != nil {
+	client, err := api.NewClient(cfg)
+	exitOnError(err)
+
+	// Use config value if flag wasn't explicitly set
+	cname := tuiContainerName
+	if cmd == nil || !cmd.Flags().Changed("container") {
+		if GetConfig() != nil {
 			cname = GetConfig().Registry.ContainerName
 		}
+	}
 
-		// Get data directory from config
-		dataDir := ""
-		if GetConfig() != nil {
-			dataDir = GetConfig().Registry.DataDir
-		}
+	// Get data directory from config
+	dataDir := ""
+	if GetConfig() != nil {
+		dataDir = GetConfig().Registry.DataDir
+	}
 
-		// Try to set up Docker client and registry manager for server features
-		docker, dockerErr := registry.NewDockerClient()
-		var reg *registry.Registry
-		if dockerErr == nil {
-			reg = registry.NewRegistry(docker, registry.RegistryConfig{
-				ContainerName: cname,
-				HostName:      registryHost,
-				HostPort:      fmt.Sprintf("%d", registryPort),
-				DataVolume:    dataDir,
-			})
-		}
-
-		// Set up skopeo for add image functionality
-		skopeo := registry.NewSkopeo(registry.SkopeoConfig{
-			InsecurePolicy: insecure,
+	// Try to set up Docker client and registry manager for server features
+	docker, dockerErr := registry.NewDockerClient()
+	var reg *registry.Registry
+	if dockerErr == nil {
+		reg = registry.NewRegistry(docker, registry.RegistryConfig{
+			ContainerName: cname,
+			HostName:      registryHost,
+			HostPort:      fmt.Sprintf("%d", registryPort),
+			DataVolume:    dataDir,
 		})
+	}
 
-		err = tui.RunWithFullFeatures(client, reg, docker, cname, skopeo, insecure)
-		exitOnError(err)
-	},
+	// Set up skopeo for add image functionality
+	skopeo := registry.NewSkopeo(registry.SkopeoConfig{
+		InsecurePolicy: insecure,
+	})
+
+	err = tui.RunWithFullFeatures(client, reg, docker, cname, skopeo, insecure)
+	exitOnError(err)
 }
 
 func init() {

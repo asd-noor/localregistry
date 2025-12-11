@@ -32,7 +32,13 @@ Configuration is loaded from (in order of precedence):
   1. Command-line flags
   2. Environment variables (LR_REGISTRY_HOST, LR_REGISTRY_PORT, etc.)
   3. Config file (~/.config/local-registry/config.yaml)
-  4. Embedded defaults`,
+  4. Embedded defaults
+
+Running without a subcommand launches the interactive TUI.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		// Default to TUI when no subcommand is provided
+		runTUI(cmd)
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		slog.Debug("applying configuration",
 			"host", cfg.Registry.Host,
