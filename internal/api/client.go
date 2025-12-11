@@ -58,7 +58,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 
 	userAgent := cfg.UserAgent
 	if userAgent == "" {
-		userAgent = "localregistry-client/1.0"
+		userAgent = "local-registry-client/1.0"
 	}
 
 	slog.Debug("initialized api client",

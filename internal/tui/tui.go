@@ -18,8 +18,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"localregistry/internal/api"
-	"localregistry/internal/registry"
+	"local-registry/internal/api"
+	"local-registry/internal/registry"
 )
 
 // ViewState represents the current view in the TUI.

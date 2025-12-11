@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"localregistry/internal/registry"
+	"local-registry/internal/registry"
 
 	"github.com/spf13/cobra"
 )
@@ -32,16 +32,16 @@ from the local Docker daemon. If target is not specified, the image name
 
 Examples:
   # Add alpine from Docker Hub
-  localregistry add alpine
+  local-registry add alpine
 
   # Add with custom target name
-  localregistry add ghcr.io/myorg/app:v1.0 myapp:v1.0
+  local-registry add ghcr.io/myorg/app:v1.0 myapp:v1.0
 
   # Add from local Docker daemon (auto-detected)
-  localregistry add mylocal:latest
+  local-registry add mylocal:latest
 
   # Add multi-architecture image
-  localregistry add --all alpine:latest`,
+  local-registry add --all alpine:latest`,
 	Args: cobra.RangeArgs(1, 2),
 	Run: func(cmd *cobra.Command, args []string) {
 		source := args[0]
@@ -190,8 +190,8 @@ var inspectCmd = &cobra.Command{
 	Long: `Retrieve and display information about an image in the registry.
 
 Examples:
-  localregistry inspect myapp:latest
-  localregistry inspect alpine`,
+  local-registry inspect myapp:latest
+  local-registry inspect alpine`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		image := args[0]
@@ -259,10 +259,10 @@ Supports various transports:
 
 Examples:
   # Copy from Docker Hub to local registry
-  localregistry copy docker://alpine docker://localhost:5000/alpine
+  local-registry copy docker://alpine docker://localhost:5000/alpine
 
   # Copy from local registry to another registry
-  localregistry copy docker://localhost:5000/myapp docker://ghcr.io/myorg/myapp`,
+  local-registry copy docker://localhost:5000/myapp docker://ghcr.io/myorg/myapp`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		source := args[0]

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"localregistry/internal/registry"
+	"local-registry/internal/registry"
 
 	"github.com/spf13/cobra"
 )
@@ -196,8 +196,8 @@ unreferenced blobs and layers. Use --delete-untagged to also remove
 manifests that are not currently tagged.
 
 Example:
-  localregistry server gc
-  localregistry server gc --delete-untagged`,
+  local-registry server gc
+  local-registry server gc --delete-untagged`,
 	Run: func(cmd *cobra.Command, args []string) {
 		docker, err := registry.NewDockerClient()
 		exitOnError(err)

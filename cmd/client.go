@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"localregistry/internal/api"
+	"local-registry/internal/api"
 )
 
 var (

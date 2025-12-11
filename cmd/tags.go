@@ -14,9 +14,9 @@ var tagsCmd = &cobra.Command{
 If a tag is provided in the image reference, it will be ignored.
 
 Examples:
-  localregistry tags alpine
-  localregistry tags library/alpine
-  localregistry tags alpine:latest  # tag is ignored, lists all tags`,
+  local-registry tags alpine
+  local-registry tags library/alpine
+  local-registry tags alpine:latest  # tag is ignored, lists all tags`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		// Strip any tag from the input - we only need the repository name

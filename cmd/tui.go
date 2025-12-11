@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"localregistry/internal/api"
-	"localregistry/internal/registry"
-	"localregistry/internal/tui"
+	"local-registry/internal/api"
+	"local-registry/internal/registry"
+	"local-registry/internal/tui"
 
 	"github.com/spf13/cobra"
 )
@@ -27,8 +27,8 @@ The TUI provides:
   - Garbage collection
 
 Examples:
-  localregistry tui
-  localregistry tui --container my-registry`,
+  local-registry tui
+  local-registry tui --container my-registry`,
 	Run: func(cmd *cobra.Command, args []string) {
 		address := fmt.Sprintf("%s:%d", registryHost, registryPort)
 		cfg := api.ClientConfig{

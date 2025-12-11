@@ -9,18 +9,18 @@ import (
 var completionCmd = &cobra.Command{
 	Use:   "completion [bash|zsh|fish|powershell]",
 	Short: "Generate shell completion scripts",
-	Long: `Generate shell completion scripts for localregistry.
+	Long: `Generate shell completion scripts for local-registry.
 
 To load completions:
 
 Bash:
-  $ source <(localregistry completion bash)
+  $ source <(local-registry completion bash)
 
   # To load completions for each session, execute once:
   # Linux:
-  $ localregistry completion bash > /etc/bash_completion.d/localregistry
+  $ local-registry completion bash > /etc/bash_completion.d/local-registry
   # macOS:
-  $ localregistry completion bash > $(brew --prefix)/etc/bash_completion.d/localregistry
+  $ local-registry completion bash > $(brew --prefix)/etc/bash_completion.d/local-registry
 
 Zsh:
   # If shell completion is not already enabled in your environment,
@@ -28,21 +28,21 @@ Zsh:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
 
   # To load completions for each session, execute once:
-  $ localregistry completion zsh > "${fpath[1]}/_localregistry"
+  $ local-registry completion zsh > "${fpath[1]}/_local-registry"
 
   # You will need to start a new shell for this setup to take effect.
 
 Fish:
-  $ localregistry completion fish | source
+  $ local-registry completion fish | source
 
   # To load completions for each session, execute once:
-  $ localregistry completion fish > ~/.config/fish/completions/localregistry.fish
+  $ local-registry completion fish > ~/.config/fish/completions/local-registry.fish
 
 PowerShell:
-  PS> localregistry completion powershell | Out-String | Invoke-Expression
+  PS> local-registry completion powershell | Out-String | Invoke-Expression
 
   # To load completions for every new session, run:
-  PS> localregistry completion powershell > localregistry.ps1
+  PS> local-registry completion powershell > local-registry.ps1
   # and source this file from your PowerShell profile.
 `,
 	DisableFlagsInUseLine: true,

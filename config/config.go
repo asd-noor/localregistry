@@ -1,6 +1,6 @@
-// Package config provides configuration management for localregistry.
+// Package config provides configuration management for local-registry.
 // It reads configuration from the OS-appropriate user config directory
-// (e.g., ~/.config/localregistry/config.yaml on Linux) using Viper,
+// (e.g., ~/.config/local-registry/config.yaml on Linux) using Viper,
 // with support for environment variables and sensible defaults.
 //
 // Recognized environment variables (prefix LR_):
@@ -54,7 +54,7 @@ type Config struct {
 
 // Load initializes and returns the application configuration.
 // It loads configuration from the OS-appropriate config directory (e.g.,
-// $HOME/.config/localregistry/config.yaml on Linux), with fallback to
+// $HOME/.config/local-registry/config.yaml on Linux), with fallback to
 // embedded defaults if the file doesn't exist.
 // Environment variables prefixed with LR_ override config file values.
 func Load() (*Config, error) {
@@ -200,7 +200,7 @@ func configFilePath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot determine config directory: %w", err)
 	}
-	return filepath.Join(configDir, "localregistry", "config.yaml"), nil
+	return filepath.Join(configDir, "local-registry", "config.yaml"), nil
 }
 
 // ConfigFilePath returns the path to the config file that would be used.

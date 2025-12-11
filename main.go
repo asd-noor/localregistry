@@ -1,4 +1,4 @@
-// Package main is the entry point for the localregistry CLI.
+// Package main is the entry point for the local-registry CLI.
 package main
 
 import (
@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 
-	"localregistry/cmd"
-	"localregistry/config"
+	"local-registry/cmd"
+	"local-registry/config"
 )
 
 func main() {

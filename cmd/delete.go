@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"localregistry/internal/registry"
+	"local-registry/internal/registry"
 
 	"github.com/spf13/cobra"
 )
@@ -36,8 +36,8 @@ This command:
 3. Optionally runs garbage collection to reclaim disk space
 
 Examples:
-  localregistry delete repo myapp
-  localregistry delete repo org/myapp`,
+  local-registry delete repo myapp
+  local-registry delete repo org/myapp`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		// Strip any tag - we're deleting the whole repo
@@ -125,16 +125,16 @@ The image reference can include a tag, or tags can be provided as additional arg
 
 Examples:
   # Delete specific tag
-  localregistry delete image myapp:v1.0
+  local-registry delete image myapp:v1.0
 
   # Delete multiple tags
-  localregistry delete image myapp v1.0 v1.1
+  local-registry delete image myapp v1.0 v1.1
 
   # Delete all tags from a repository
-  localregistry delete image myapp
+  local-registry delete image myapp
 
   # Delete with garbage collection
-  localregistry delete image myapp:v1.0 --gc`,
+  local-registry delete image myapp:v1.0 --gc`,
 	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name, tag := parseImageRef(args[0])
@@ -236,8 +236,8 @@ The image reference must include a tag:
   - repository/name:tag (e.g., library/alpine:latest)
 
 Examples:
-  localregistry delete tag myapp:v1.0
-  localregistry delete tag org/myapp:latest`,
+  local-registry delete tag myapp:v1.0
+  local-registry delete tag org/myapp:latest`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name, tag := parseImageRef(args[0])

@@ -1,3 +1,7 @@
+# Instructions for AI Agents
+
+STAGE FILES BUT NEVER COMMIT AND PUSH WITHOUT ASKING.
+
 # Local Registry
 
 This tool runs `https://hub.docker.com/_/registry` in docker for managing a local image registry which is to be used with k3d, kind etc. for development purposes.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Welcome to **localregistry**, a sophisticated Go-based command-line tool designed to simplify your interactions with Docker registries during development. Think of it as your friendly neighborhood registry manager—it helps you run a local Docker registry container and provides both a powerful CLI and an interactive Terminal User Interface (TUI) to manage container images effortlessly.
+Welcome to **local-registry**, a sophisticated Go-based command-line tool designed to simplify your interactions with Docker registries during development. Think of it as your friendly neighborhood registry manager—it helps you run a local Docker registry container and provides both a powerful CLI and an interactive Terminal User Interface (TUI) to manage container images effortlessly.
 
 If you've ever found yourself wrestling with Docker registries in local Kubernetes clusters like k3d or kind, this tool is your new best friend. It handles all the heavy lifting: starting registry containers, mirroring images from Docker Hub or other registries, managing tags, and even running garbage collection to keep your disk space in check.
 
@@ -10,7 +10,7 @@ If you've ever found yourself wrestling with Docker registries in local Kubernet
 
 ## What Does It Do?
 
-At its core, **localregistry** does three main things:
+At its core, **local-registry** does three main things:
 
 ### 1. Registry Server Management
 It manages a local Docker registry container (the official `registry:3` image from Docker Hub) right on your machine. You can:
@@ -48,7 +48,7 @@ Let's peek under the hood to understand the architecture and how everything fits
 The project follows a clean, modular architecture with clear separation of concerns:
 
 ```
-localregistry/
+local-registry/
 ├── main.go                    # Entry point: config loading, logging setup
 ├── cmd/                       # CLI commands (Cobra)
 │   ├── root.go               # Root command, config binding
@@ -86,7 +86,7 @@ The configuration system uses **Viper** and follows a hierarchical precedence mo
 **Precedence order (highest to lowest):**
 1. Command-line flags (e.g., `--host localhost --port 5000`)
 2. Environment variables with `LR_` prefix (e.g., `LR_REGISTRY_HOST=localhost`)
-3. User config file at `~/.config/localregistry/config.yaml`
+3. User config file at `~/.config/local-registry/config.yaml`
 4. Embedded defaults from `default_config.yaml`
 
 **Default configuration:**
@@ -132,7 +132,7 @@ The client handles:
 
 **Example flow for listing repositories:**
 ```
-User runs: localregistry catalog
+User runs: local-registry catalog
     ↓
 cmd/catalog.go creates API client
     ↓
@@ -205,38 +205,38 @@ The TUI maintains state for the current view, selected items, API client, Docker
 **Build from source:**
 ```bash
 git clone <repository-url>
-cd localregistry
-make build    # Builds to ./bin/localregistry
+cd local-registry
+make build    # Builds to ./bin/local-registry
 # or
-go build -o localregistry
+go build -o local-registry
 ```
 
 ### Quick Start
 
 **1. Start the local registry:**
 ```bash
-localregistry server start
+local-registry server start
 ```
 This starts a registry container at `localhost:5000` with default settings.
 
 **2. Add an image from Docker Hub:**
 ```bash
-localregistry add alpine:latest
+local-registry add alpine:latest
 ```
 This mirrors Alpine Linux from Docker Hub to your local registry.
 
 **3. Verify it's there:**
 ```bash
-localregistry catalog
+local-registry catalog
 # Output: alpine
 
-localregistry tags alpine
+local-registry tags alpine
 # Output: latest
 ```
 
 **4. Try the interactive TUI:**
 ```bash
-localregistry tui
+local-registry tui
 ```
 Navigate with arrow keys, press Enter to select, 'q' to quit.
 
@@ -244,8 +244,8 @@ Navigate with arrow keys, press Enter to select, 'q' to quit.
 
 **Create a config file (optional):**
 ```bash
-mkdir -p ~/.config/localregistry
-cat > ~/.config/localregistry/config.yaml <<EOF
+mkdir -p ~/.config/local-registry
+cat > ~/.config/local-registry/config.yaml <<EOF
 registry:
   host: localhost
   port: 5000
@@ -260,12 +260,12 @@ EOF
 export LR_REGISTRY_HOST=localhost
 export LR_REGISTRY_PORT=5000
 export LR_LOG_LEVEL=debug
-localregistry catalog
+local-registry catalog
 ```
 
 **Or use CLI flags:**
 ```bash
-localregistry --host localhost --port 5000 catalog
+local-registry --host localhost --port 5000 catalog
 ```
 
 ### Common Use Cases
@@ -273,11 +273,11 @@ localregistry --host localhost --port 5000 catalog
 #### Use Case 1: Develop with k3d
 ```bash
 # Start registry
-localregistry server start
+local-registry server start
 
 # Add images you need
-localregistry add nginx:alpine
-localregistry add postgres:15
+local-registry add nginx:alpine
+local-registry add postgres:15
 
 # Create k3d cluster with registry
 k3d cluster create mycluster --registry-use localhost:5000
@@ -289,28 +289,28 @@ kubectl create deployment nginx --image=localhost:5000/nginx:alpine
 #### Use Case 2: Mirror Multi-Architecture Images
 ```bash
 # Copy all architectures (amd64, arm64, etc.)
-localregistry add --all docker.io/library/golang:1.21
+local-registry add --all docker.io/library/golang:1.21
 
 # Inspect to verify
-localregistry inspect golang:1.21
+local-registry inspect golang:1.21
 ```
 
 #### Use Case 3: Clean Up Old Images
 ```bash
 # Delete specific tags
-localregistry delete tag myapp v1.0.0
+local-registry delete tag myapp v1.0.0
 
 # Delete entire repository
-localregistry delete repo old-project
+local-registry delete repo old-project
 
 # Run garbage collection to reclaim space
-localregistry server gc --delete-untagged
+local-registry server gc --delete-untagged
 ```
 
 #### Use Case 4: Copy Between Registries
 ```bash
 # Copy from local registry to GHCR
-localregistry copy \
+local-registry copy \
   docker://localhost:5000/myapp:v1.0 \
   docker://ghcr.io/myorg/myapp:v1.0 \
   --dest-creds username:token
@@ -320,77 +320,77 @@ localregistry copy \
 
 **Server Management:**
 ```bash
-localregistry server start              # Start registry container
-localregistry server stop               # Stop registry
-localregistry server restart            # Restart registry
-localregistry server status             # Show status (running/stopped)
-localregistry server info               # Detailed container info
-localregistry server gc                 # Run garbage collection
+local-registry server start              # Start registry container
+local-registry server stop               # Stop registry
+local-registry server restart            # Restart registry
+local-registry server status             # Show status (running/stopped)
+local-registry server info               # Detailed container info
+local-registry server gc                 # Run garbage collection
 ```
 
 **Image Operations:**
 ```bash
-localregistry add <source> [target]     # Add/mirror an image
-localregistry add alpine                # From Docker Hub (docker.io/library/alpine)
-localregistry add myimage:latest        # From local Docker daemon (auto-detected)
-localregistry add ghcr.io/user/app      # From GHCR
-localregistry add --all nginx:latest    # Copy all architectures
+local-registry add <source> [target]     # Add/mirror an image
+local-registry add alpine                # From Docker Hub (docker.io/library/alpine)
+local-registry add myimage:latest        # From local Docker daemon (auto-detected)
+local-registry add ghcr.io/user/app      # From GHCR
+local-registry add --all nginx:latest    # Copy all architectures
 
-localregistry inspect <image>           # Show image details
-localregistry copy <src> <dest>         # Copy between registries
+local-registry inspect <image>           # Show image details
+local-registry copy <src> <dest>         # Copy between registries
 ```
 
 **Registry Queries:**
 ```bash
-localregistry catalog                   # List all repositories
-localregistry tags <repo>               # List tags for a repository
-localregistry ping                      # Check registry connectivity
+local-registry catalog                   # List all repositories
+local-registry tags <repo>               # List tags for a repository
+local-registry ping                      # Check registry connectivity
 ```
 
 **Deletion:**
 ```bash
-localregistry delete tag <repo> <tag>   # Delete specific tag
-localregistry delete image <repo> [tags...] # Delete tags (all if none specified)
-localregistry delete repo <repo>        # Delete entire repository
+local-registry delete tag <repo> <tag>   # Delete specific tag
+local-registry delete image <repo> [tags...] # Delete tags (all if none specified)
+local-registry delete repo <repo>        # Delete entire repository
 # Add --gc flag to run garbage collection after deletion
 ```
 
 **Interactive TUI:**
 ```bash
-localregistry tui                       # Launch interactive interface
+local-registry tui                       # Launch interactive interface
 ```
 
 **Configuration:**
 ```bash
-localregistry config                    # Show current configuration
-localregistry version                   # Show version info
+local-registry config                    # Show current configuration
+local-registry version                   # Show version info
 ```
 
 ### Advanced Configuration
 
 **Custom registry port:**
 ```bash
-localregistry server start --port 5001
-localregistry --port 5001 catalog
+local-registry server start --port 5001
+local-registry --port 5001 catalog
 ```
 
 **With authentication:**
 ```bash
 # Start with credentials
-localregistry server start --user admin --pass secret
+local-registry server start --user admin --pass secret
 
 # Use credentials in commands
-localregistry --user admin --pass secret catalog
+local-registry --user admin --pass secret catalog
 ```
 
 **Skip TLS verification (for self-signed certs):**
 ```bash
-localregistry --insecure add myregistry.local/image:tag
+local-registry --insecure add myregistry.local/image:tag
 ```
 
 **Increase timeout for slow networks:**
 ```bash
-localregistry --timeout 120s add large-image:tag
+local-registry --timeout 120s add large-image:tag
 ```
 
 ---
@@ -399,7 +399,7 @@ localregistry --timeout 120s add large-image:tag
 
 ### Data Flow: Adding an Image
 
-Let's trace what happens when you run `localregistry add alpine:latest`:
+Let's trace what happens when you run `local-registry add alpine:latest`:
 
 1. **Command Parsing** (`cmd/add.go:46`)
    - Cobra parses arguments: source = "alpine:latest"
@@ -423,7 +423,7 @@ Let's trace what happens when you run `localregistry add alpine:latest`:
 
 ### Data Flow: Deleting a Repository
 
-When you run `localregistry delete repo myapp --gc`:
+When you run `local-registry delete repo myapp --gc`:
 
 1. **List Tags** (`cmd/delete.go:47`)
    - API client calls `GET /v2/myapp/tags/list`
@@ -522,7 +522,7 @@ Using `//go:embed` to bundle `default_config.yaml` ensures:
 
 **CLI for automation:**
 - Scriptable (CI/CD pipelines, automation scripts)
-- Composable with Unix tools (`localregistry catalog | grep myapp`)
+- Composable with Unix tools (`local-registry catalog | grep myapp`)
 - Fast for single operations
 
 **TUI for exploration:**
@@ -538,11 +538,11 @@ Using `//go:embed` to bundle `default_config.yaml` ensures:
 ### Development Workflow
 ```bash
 # Morning: Start registry
-localregistry server start
+local-registry server start
 
 # Add base images
-localregistry add golang:1.21-alpine
-localregistry add postgres:15-alpine
+local-registry add golang:1.21-alpine
+local-registry add postgres:15-alpine
 
 # Work on your app, build images
 docker build -t localhost:5000/myapp:dev .
@@ -553,11 +553,11 @@ k3d cluster create dev --registry-use localhost:5000
 kubectl create deployment myapp --image=localhost:5000/myapp:dev
 
 # Evening: Check what's stored
-localregistry tui  # Browse visually
+local-registry tui  # Browse visually
 
 # Cleanup old tags
-localregistry delete tag myapp old-dev-tag
-localregistry server gc
+local-registry delete tag myapp old-dev-tag
+local-registry server gc
 ```
 
 ### CI/CD Integration
@@ -566,17 +566,17 @@ localregistry server gc
 # ci-pipeline.sh
 
 # Ensure registry is running
-localregistry server status || localregistry server start
+local-registry server status || local-registry server start
 
 # Mirror dependencies to local registry (faster pulls in CI)
-localregistry add --quiet alpine:latest
-localregistry add --quiet node:18-alpine
+local-registry add --quiet alpine:latest
+local-registry add --quiet node:18-alpine
 
 # Run tests using local images
 docker run --rm localhost:5000/node:18-alpine npm test
 
 # Cleanup
-localregistry server gc --delete-untagged
+local-registry server gc --delete-untagged
 ```
 
 ---
@@ -592,7 +592,7 @@ docker ps
 lsof -i :5000
 
 # View registry logs
-localregistry tui  # Navigate to logs view
+local-registry tui  # Navigate to logs view
 # Or with Docker:
 docker logs registry
 ```
@@ -614,25 +614,25 @@ sudo dnf install skopeo
 If you see certificate errors:
 ```bash
 # Use insecure flag
-localregistry --insecure add myimage:tag
+local-registry --insecure add myimage:tag
 
 # Or set in config
 echo "registry:
-  insecure: true" > ~/.config/localregistry/config.yaml
+  insecure: true" > ~/.config/local-registry/config.yaml
 ```
 
 ### Out of Disk Space
 ```bash
 # Run garbage collection
-localregistry server gc --delete-untagged
+local-registry server gc --delete-untagged
 
 # Check registry size
 docker exec registry du -sh /var/lib/registry
 
 # Delete unused repositories
-localregistry delete repo old-project-1
-localregistry delete repo old-project-2
-localregistry server gc
+local-registry delete repo old-project-1
+local-registry delete repo old-project-2
+local-registry server gc
 ```
 
 ---
@@ -673,7 +673,7 @@ Based on the codebase structure, potential additions could include:
 
 ## Conclusion
 
-**localregistry** is a thoughtfully designed tool that bridges the gap between Docker's complexity and developer productivity. Whether you're running local Kubernetes clusters, testing container images, or managing a development registry, it provides the right tool for the job—from scriptable CLI commands to an intuitive TUI.
+**local-registry** is a thoughtfully designed tool that bridges the gap between Docker's complexity and developer productivity. Whether you're running local Kubernetes clusters, testing container images, or managing a development registry, it provides the right tool for the job—from scriptable CLI commands to an intuitive TUI.
 
 The modular architecture makes it maintainable and extensible, while the use of industry-standard tools (Docker SDK, Skopeo) ensures reliability. The configuration system is flexible enough for both casual users (zero-config) and power users (fine-grained control).
 

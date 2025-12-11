@@ -1,4 +1,4 @@
-// Package cmd implements the CLI commands for localregistry.
+// Package cmd implements the CLI commands for local-registry.
 package cmd
 
 import (
@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"localregistry/config"
+	"local-registry/config"
 
 	"github.com/spf13/cobra"
 )
@@ -31,7 +31,7 @@ as well as delete operations for registry management.
 Configuration is loaded from (in order of precedence):
   1. Command-line flags
   2. Environment variables (LR_REGISTRY_HOST, LR_REGISTRY_PORT, etc.)
-  3. Config file (~/.config/localregistry/config.yaml)
+  3. Config file (~/.config/local-registry/config.yaml)
   4. Embedded defaults`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		slog.Debug("applying configuration",
@@ -78,7 +78,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("localregistry %s (%s)\n", Version, Commit)
+		fmt.Printf("local-registry %s (%s)\n", Version, Commit)
 	},
 }
 

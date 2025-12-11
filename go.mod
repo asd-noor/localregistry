@@ -1,4 +1,4 @@
-module localregistry
+module local-registry
 
 go 1.25.5
 

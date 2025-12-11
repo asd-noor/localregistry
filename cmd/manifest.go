@@ -26,10 +26,10 @@ The image reference can include a tag or digest:
 If no tag is specified, "latest" is assumed.
 
 Examples:
-  localregistry manifest get alpine
-  localregistry manifest get alpine:3.18
-  localregistry manifest get alpine@sha256:abc123...
-  localregistry manifest get library/alpine:latest`,
+  local-registry manifest get alpine
+  local-registry manifest get alpine:3.18
+  local-registry manifest get alpine@sha256:abc123...
+  local-registry manifest get library/alpine:latest`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name, reference := parseImageRef(args[0])
@@ -58,9 +58,9 @@ The image reference can include a tag or digest:
 If no tag is specified, "latest" is assumed.
 
 Examples:
-  localregistry manifest head alpine
-  localregistry manifest head alpine:3.18
-  localregistry manifest head alpine@sha256:abc123...`,
+  local-registry manifest head alpine
+  local-registry manifest head alpine:3.18
+  local-registry manifest head alpine@sha256:abc123...`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name, reference := parseImageRef(args[0])
@@ -88,8 +88,8 @@ The image reference can include a tag or digest:
 When deleting by tag, the manifest digest is first retrieved, then deleted.
 
 Examples:
-  localregistry manifest delete alpine:latest
-  localregistry manifest delete alpine@sha256:abc123...`,
+  local-registry manifest delete alpine:latest
+  local-registry manifest delete alpine@sha256:abc123...`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name, reference := parseImageRef(args[0])
