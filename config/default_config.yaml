@@ -1,12 +1,12 @@
-# Default configuration for localregistry
+# Default configuration for local-registry
 # These values are used when no user config file exists.
 
 # Registry connection settings
 registry:
   host: localhost
   port: 5000
-  container_name: local-container-registry
-  datadir: "~/.local/share/local-container-registry"
+  container_name: local-registry
+  data_dir: "$XDG_DATA_HOME/local-registry/data"
   username: ""
   password: ""
   insecure: false
@@ -14,3 +14,4 @@ registry:
 
 # Application settings
 log_level: info
+log_dir: "$XDG_DATA_HOME/local-registry/logs"

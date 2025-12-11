@@ -99,7 +99,7 @@ Added early validation with clear error message: "source image cannot be empty"
 **Status:** FIXED
 
 **Description:**  
-The `--container` flag default was `"registry"` but the actual container name from config is `"local-container-registry"`.
+The `--container` flag default was `"registry"` but the actual container name from config is `"local-registry"`.
 
 **Fix:**  
 Changed flag default to empty string. The code falls back to config value when flag is not explicitly set. Help text no longer shows misleading default.

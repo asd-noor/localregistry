@@ -39,7 +39,7 @@ type RegistryConfig struct {
 	Host          string        `mapstructure:"host"`
 	Port          int           `mapstructure:"port"`
 	ContainerName string        `mapstructure:"container_name"`
-	DataDir       string        `mapstructure:"datadir"`
+	DataDir       string        `mapstructure:"data_dir"`
 	Username      string        `mapstructure:"username"`
 	Password      string        `mapstructure:"password"`
 	Insecure      bool          `mapstructure:"insecure"`
@@ -50,6 +50,7 @@ type RegistryConfig struct {
 type Config struct {
 	Registry RegistryConfig `mapstructure:"registry"`
 	LogLevel string         `mapstructure:"log_level"`
+	LogDir   string         `mapstructure:"log_dir"`
 }
 
 // Load initializes and returns the application configuration.
@@ -126,6 +127,15 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("failed to expand datadir path: %w", err)
 		}
 		c.Registry.DataDir = expanded
+	}
+
+	// Expand LogDir path (handle ~ and env vars)
+	if c.LogDir != "" {
+		expanded, err := expandPath(c.LogDir)
+		if err != nil {
+			return fmt.Errorf("failed to expand log_dir path: %w", err)
+		}
+		c.LogDir = expanded
 	}
 
 	// Normalize log level to lowercase for case-insensitive validation
