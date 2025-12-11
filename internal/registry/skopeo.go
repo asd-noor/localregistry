@@ -264,3 +264,67 @@ func hasTransportPrefix(image string) bool {
 func Bool(v bool) *bool {
 	return &v
 }
+
+// ExtractImageName extracts the image name from a full reference.
+// e.g., "ghcr.io/org/app:v1" -> "org/app:v1"
+// e.g., "alpine:latest" -> "alpine:latest"
+func ExtractImageName(ref string) string {
+	// Remove transport prefix if present
+	ref = strings.TrimPrefix(ref, string(TransportDocker))
+	ref = strings.TrimPrefix(ref, string(TransportDockerDaemon))
+
+	// Check if it has a registry prefix (contains a dot before the first slash)
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) == 2 && strings.Contains(parts[0], ".") {
+		// Has registry prefix, return the rest
+		return parts[1]
+	}
+
+	// Check for docker.io/library/ prefix
+	if strings.HasPrefix(ref, "docker.io/library/") {
+		return strings.TrimPrefix(ref, "docker.io/library/")
+	}
+	if strings.HasPrefix(ref, "docker.io/") {
+		return strings.TrimPrefix(ref, "docker.io/")
+	}
+
+	return ref
+}
+
+// DetermineSourceRef determines the appropriate skopeo source reference.
+// It checks if the image exists in the local Docker daemon first.
+func DetermineSourceRef(source string) string {
+	// If it already has a transport prefix, use as-is
+	if strings.HasPrefix(source, string(TransportDocker)) ||
+		strings.HasPrefix(source, string(TransportDockerDaemon)) ||
+		strings.HasPrefix(source, "oci:") ||
+		strings.HasPrefix(source, "dir:") {
+		return source
+	}
+
+	// Check if image exists locally in Docker daemon
+	docker, err := NewDockerClient()
+	if err == nil {
+		ctx := context.Background()
+		exists, checkErr := docker.ImageExists(ctx, source)
+		if checkErr == nil && exists {
+			// Image found in local Docker daemon
+			return ImageRef(TransportDockerDaemon, source)
+		}
+	}
+
+	// Not found locally - determine the remote registry reference
+	if !strings.Contains(source, "/") {
+		// Bare image name like "alpine" - assume Docker Hub library
+		return ImageRef(TransportDocker, "docker.io/library/"+source)
+	}
+
+	// Check if it looks like a Docker Hub image (no dots in first segment)
+	parts := strings.SplitN(source, "/", 2)
+	if !strings.Contains(parts[0], ".") && !strings.Contains(parts[0], ":") {
+		// Looks like docker.io user/repo format
+		return ImageRef(TransportDocker, "docker.io/"+source)
+	}
+
+	return ImageRef(TransportDocker, source)
+}

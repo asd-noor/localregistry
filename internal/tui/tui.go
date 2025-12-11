@@ -1610,13 +1610,13 @@ func (m Model) addImage(source string) tea.Cmd {
 		}
 
 		// Extract target name from source
-		target := extractImageName(source)
+		target := registry.ExtractImageName(source)
 
 		// Build destination reference
 		dest := fmt.Sprintf("%s/%s", m.client.Address(), target)
 
 		// Determine source reference
-		srcRef := determineSourceRef(source)
+		srcRef := registry.DetermineSourceRef(source)
 
 		// Build copy options
 		opts := &registry.CopyOptions{
@@ -1635,62 +1635,4 @@ func (m Model) addImage(source string) tea.Cmd {
 
 		return addImageSuccessMsg(fmt.Sprintf("Successfully added %s", dest))
 	}
-}
-
-// extractImageName extracts the image name from a full reference.
-func extractImageName(ref string) string {
-	// Remove transport prefix if present
-	ref = strings.TrimPrefix(ref, "docker://")
-	ref = strings.TrimPrefix(ref, "docker-daemon:")
-
-	// Check if it has a registry prefix (contains a dot before the first slash)
-	parts := strings.SplitN(ref, "/", 2)
-	if len(parts) == 2 && strings.Contains(parts[0], ".") {
-		return parts[1]
-	}
-
-	// Check for docker.io/library/ prefix
-	if strings.HasPrefix(ref, "docker.io/library/") {
-		return strings.TrimPrefix(ref, "docker.io/library/")
-	}
-	if strings.HasPrefix(ref, "docker.io/") {
-		return strings.TrimPrefix(ref, "docker.io/")
-	}
-
-	return ref
-}
-
-// determineSourceRef determines the appropriate skopeo source reference.
-func determineSourceRef(source string) string {
-	// If it already has a transport prefix, use as-is
-	if strings.HasPrefix(source, "docker://") ||
-		strings.HasPrefix(source, "docker-daemon:") ||
-		strings.HasPrefix(source, "oci:") ||
-		strings.HasPrefix(source, "dir:") {
-		return source
-	}
-
-	// Check if image exists locally in Docker daemon
-	docker, err := registry.NewDockerClient()
-	if err == nil {
-		ctx := context.Background()
-		exists, checkErr := docker.ImageExists(ctx, source)
-		if checkErr == nil && exists {
-			return registry.ImageRef(registry.TransportDockerDaemon, source)
-		}
-	}
-
-	// Not found locally - determine the remote registry reference
-	if !strings.Contains(source, "/") {
-		// Bare image name like "alpine" - assume Docker Hub library
-		return registry.ImageRef(registry.TransportDocker, "docker.io/library/"+source)
-	}
-
-	// Check if it looks like a Docker Hub image (no dots in first segment)
-	parts := strings.SplitN(source, "/", 2)
-	if !strings.Contains(parts[0], ".") && !strings.Contains(parts[0], ":") {
-		return registry.ImageRef(registry.TransportDocker, "docker.io/"+source)
-	}
-
-	return registry.ImageRef(registry.TransportDocker, source)
 }
