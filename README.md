@@ -241,6 +241,7 @@ make install
 ## TODO
 
 - TUI Improvement
+- Easy installation scripts
 
 ## License
 
