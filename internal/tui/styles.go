@@ -154,4 +154,24 @@ var (
 	actionErrorStyle = lipgloss.NewStyle().
 				Foreground(errorColor).
 				Bold(true)
+
+	// Notification styles
+	notificationStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(warningColor).
+				Padding(0, 1).
+				MarginTop(1)
+
+	notificationErrorStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(errorColor).
+				Background(lipgloss.Color("52")).
+				Padding(0, 1).
+				MarginTop(1)
+
+	notificationSuccessStyle = lipgloss.NewStyle().
+					Border(lipgloss.RoundedBorder()).
+					BorderForeground(successColor).
+					Padding(0, 1).
+					MarginTop(1)
 )

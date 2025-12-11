@@ -93,6 +93,10 @@ type Model struct {
 	addImageProgress string
 	skopeo           *registry.Skopeo
 	skopeoInsecure   bool
+
+	// Ephemeral notification
+	notification    string
+	notificationErr bool // true if error notification
 }
 
 type deleteTarget struct {
@@ -147,20 +151,21 @@ func truncateDigest(d string) string {
 
 // Messages for async operations.
 type (
-	reposLoadedMsg      []string
-	tagsLoadedMsg       []tagItem
-	manifestLoadedMsg   *api.Manifest
-	deleteSuccessMsg    string
-	errMsg              error
-	logLineMsg          string
-	logsStoppedMsg      struct{}
-	serverStatusMsg     *registry.RegistryInfo
-	imageDetailsMsg     *ImageDetails
-	gcCompleteMsg       *registry.GarbageCollectResult
-	serverActionDoneMsg string
-	addImageSuccessMsg  string
-	addImageProgressMsg string
-	statusTickMsg       struct{}
+	reposLoadedMsg       []string
+	tagsLoadedMsg        []tagItem
+	manifestLoadedMsg    *api.Manifest
+	deleteSuccessMsg     string
+	errMsg               error
+	logLineMsg           string
+	logsStoppedMsg       struct{}
+	serverStatusMsg      *registry.RegistryInfo
+	imageDetailsMsg      *ImageDetails
+	gcCompleteMsg        *registry.GarbageCollectResult
+	serverActionDoneMsg  string
+	addImageSuccessMsg   string
+	addImageProgressMsg  string
+	statusTickMsg        struct{}
+	clearNotificationMsg struct{}
 )
 
 // KeyMap defines the keybindings for the TUI.
@@ -369,6 +374,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg
 		m.statusMsg = errorStyle.Render("Error: " + msg.Error())
+		m.notification = msg.Error()
+		m.notificationErr = true
+		return m, m.clearNotificationAfter(4 * time.Second)
+
+	case clearNotificationMsg:
+		m.notification = ""
+		m.notificationErr = false
 		return m, nil
 
 	case logLineMsg:
@@ -691,13 +703,22 @@ func (m Model) View() string {
 		content = m.spinner.View() + " " + m.statusMsg + "\n\n" + content
 	}
 
+	// Render ephemeral notification if present
+	notification := m.renderNotification()
+
 	statusBar := m.renderStatusBar()
 
 	// Combine all parts
+	var result string
 	if serverPanel != "" {
-		return serverPanel + "\n" + content + "\n" + statusBar
+		result = serverPanel + "\n" + content
+	} else {
+		result = content
 	}
-	return content + "\n" + statusBar
+	if notification != "" {
+		result += "\n" + notification
+	}
+	return result + "\n" + statusBar
 }
 
 func (m Model) renderManifest() string {
@@ -1539,6 +1560,17 @@ func (m Model) renderServerStatus() string {
 	return statusPanelStyle.Width(m.width - 4).Render(info)
 }
 
+// renderNotification renders the ephemeral notification if present.
+func (m Model) renderNotification() string {
+	if m.notification == "" {
+		return ""
+	}
+	if m.notificationErr {
+		return notificationErrorStyle.Width(m.width - 4).Render(errorStyle.Render("Error: ") + m.notification)
+	}
+	return notificationStyle.Width(m.width - 4).Render(m.notification)
+}
+
 // formatBytes formats a byte size to human readable format.
 func formatBytes(b int64) string {
 	const unit = 1024
@@ -1557,6 +1589,13 @@ func formatBytes(b int64) string {
 func (m Model) tickServerStatus() tea.Cmd {
 	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 		return statusTickMsg{}
+	})
+}
+
+// clearNotificationAfter returns a command that clears the notification after the given duration.
+func (m Model) clearNotificationAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return clearNotificationMsg{}
 	})
 }
 
